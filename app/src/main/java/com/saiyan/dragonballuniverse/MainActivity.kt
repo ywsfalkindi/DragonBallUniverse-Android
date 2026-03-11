@@ -14,8 +14,13 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.composed
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.pager.HorizontalPager
@@ -27,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -41,6 +47,7 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -53,7 +60,15 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,7 +78,9 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -74,6 +91,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -323,6 +343,43 @@ private fun clampPanOffset(
         x = offset.x.coerceIn(-maxTranslationX, maxTranslationX),
         y = offset.y.coerceIn(-maxTranslationY, maxTranslationY)
     )
+}
+
+/**
+ * Bounce click + Haptic feedback.
+ * - onPress: scale to 0.95f + haptic
+ * - onRelease: scale back to 1f then trigger onClick
+ */
+private fun Modifier.bounceClick(
+    onClick: () -> Unit
+): Modifier = composed {
+    val haptic = LocalHapticFeedback.current
+    var pressed by remember { mutableStateOf(false) }
+
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.95f else 1f,
+        animationSpec = tween(durationMillis = 140, easing = LinearEasing),
+        label = "bounceScale"
+    )
+
+    this
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+        }
+        .pointerInput(Unit) {
+            detectTapGestures(
+                onPress = {
+                    pressed = true
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+
+                    val released = tryAwaitRelease()
+                    pressed = false
+
+                    if (released) onClick()
+                }
+            )
+        }
 }
 
 @Composable
@@ -626,7 +683,12 @@ private fun DragonBallHomeContent(
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
+    val fetchTrigger = rememberSaveable { mutableIntStateOf(0) }
+
+    LaunchedEffect(fetchTrigger.intValue) {
+        isLoading = true
+        errorMessage = null
+
         try {
             val response = JikanRetrofitClient.apiService.getDragonBallEpisodes()
             episodesList = response.data
@@ -672,27 +734,26 @@ private fun DragonBallHomeContent(
         MainDestination.Anime -> {
             when {
                 isLoading -> {
-                    Box(
-                        modifier = modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        modifier = modifier
+                            .fillMaxSize()
+                            .background(DarkBackground),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        CircularProgressIndicator(color = GokuOrange)
+                        items(6) {
+                            ShimmerPosterCard()
+                        }
                     }
                 }
 
                 errorMessage != null -> {
-                    Box(
-                        modifier = modifier
-                            .fillMaxSize()
-                            .background(DarkBackground)
-                            .padding(16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "حدث خطأ أثناء تحميل الحلقات:\n$errorMessage",
-                            color = Color.White
-                        )
-                    }
+                    NetworkErrorScreen(
+                        errorMessage = errorMessage ?: "Unknown error",
+                        onRetry = { fetchTrigger.intValue++ }
+                    )
                 }
 
                 selectedSeason == null -> {
@@ -886,7 +947,7 @@ private fun PosterCard(
         modifier = modifier
             .size(width = 160.dp, height = 240.dp)
             .clip(shape)
-            .clickable { onClick() },
+            .bounceClick { onClick() },
         shape = shape,
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
@@ -945,11 +1006,50 @@ private fun PosterCard(
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                     maxLines = 2,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    textAlign = TextAlign.Center
                 )
             }
         }
     }
+}
+
+@Composable
+private fun ShimmerPosterCard(
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(16.dp)
+
+    var size by remember { mutableStateOf(IntSize.Zero) }
+
+    val transition = rememberInfiniteTransition(label = "shimmerTransition")
+    val progress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000, easing = LinearEasing)
+        ),
+        label = "shimmerProgress"
+    )
+
+    val startX = (-size.width).toFloat() + (size.width * 2f * progress)
+    val shimmerBrush =
+        Brush.linearGradient(
+            colors = listOf(
+                Color(0xFF2A2A2A),
+                Color(0xFF3A3A3A),
+                Color(0xFF2A2A2A)
+            ),
+            start = Offset(startX, 0f),
+            end = Offset(startX + size.width, size.height.toFloat())
+        )
+
+    Box(
+        modifier = modifier
+            .size(width = 160.dp, height = 240.dp)
+            .clip(shape)
+            .background(shimmerBrush)
+            .onSizeChanged { size = it }
+    )
 }
 
 @Composable
@@ -986,13 +1086,15 @@ private fun SeasonDetailsScreen(
                         .crossfade(true)
                         .build(),
                     contentDescription = "Banner ${season.title}",
-                    modifier = Modifier.matchParentSize(),
+                    modifier = Modifier
+                        .matchParentSize()
+                        .blur(25.dp),
                     contentScale = ContentScale.Crop,
                     placeholder = ColorPainter(Color(0xFF2A2A2A)),
                     error = ColorPainter(Color(0xFF2A2A2A))
                 )
 
-                // "Blur" إحساسي + Overlay أسود 60%
+                // Glassmorphism overlay: تدرّج أسود فوق البلور لإبراز النصوص والبوستر
                 Box(
                     modifier = Modifier
                         .matchParentSize()
@@ -1191,6 +1293,53 @@ private fun GenreChip(
 }
 
 @Composable
+private fun NetworkErrorScreen(
+    errorMessage: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(DarkBackground)
+            .padding(20.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            AsyncImage(
+                model = "https://e.top4top.io/p_3722fwcuz1.jpg",
+                contentDescription = "Network error",
+                modifier = Modifier
+                    .size(220.dp)
+                    .clip(CircleShape),
+                contentScale = ContentScale.Crop
+            )
+
+            Text(
+                text = errorMessage,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 16.dp)
+            )
+
+            Button(
+                onClick = onRetry,
+                modifier = Modifier.padding(top = 16.dp)
+            ) {
+                Text(
+                    text = "حاول مجدداً",
+                    color = Color.Black,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun EpisodeRowCard(
     episode: Episode,
     onClick: () -> Unit,
@@ -1199,7 +1348,7 @@ private fun EpisodeRowCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable { onClick() },
+            .bounceClick { onClick() },
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1B1B)),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)

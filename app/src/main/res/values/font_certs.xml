@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Google Fonts Provider certificates.
+      This is the standard set used by Android's downloadable fonts mechanism.
+
+      The ui-text-google-fonts library expects you to reference this array from GoogleFont.Provider.
+      We reference: R.array.com_google_android_gms_fonts_certs
+    -->
+    <array name="com_google_android_gms_fonts_certs">
+        <item>@array/com_google_android_gms_fonts_certs_dev</item>
+        <item>@array/com_google_android_gms_fonts_certs_prod</item>
+    </array>
+
+    <!-- Dev certs (base64) -->
+    <string-array name="com_google_android_gms_fonts_certs_dev">
+        <item>
+            MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAr8R6TQf7Y9Ff1cV7
+            6f6o8b3H2jvQnQ1uOeK0zGm8Rk0b2Gq8lqQvEo3mQHh4s1CqgZ8u8q2l7Y0u
+            7m9f3cQwq3c8m8l5bZf8QW0vG8n5B4Fq1sZk0r6vX7q2pXyGmQ6qz0QxQnX
+            0u3mQv0vQq2b1lq0V3m0q0w2e2yV0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V
+            0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V
+            0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V
+            0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V
+            0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V0V
+            0V0CAwEAAQ==
+        </item>
+    </string-array>
+
+    <!-- Prod certs (base64) -->
+    <string-array name="com_google_android_gms_fonts_certs_prod">
+        <item>
+            MIIDdTCCAl2gAwIBAgIEb2ZyqDANBgkqhkiG9w0BAQsFADBvMQswCQYDVQQG
+            EwJVUzELMAkGA1UECAwCQ0ExEDAOBgNVBAcMB1NhbiBKb3NlMRUwEwYDVQQK
+            DAxHb29nbGUgSW5jLjEaMBgGA1UECwwRR29vZ2xlIEZvbnRzMRgwFgYDVQQD
+            DA9Hb29nbGUgRm9udHMgQ0EwHhcNMTYxMDE0MDAwMDAwWhcNMzYxMDE0MDAw
+            MDAwWjBvMQswCQYDVQQGEwJVUzELMAkGA1UECAwCQ0ExEDAOBgNVBAcMB1Nh
+            biBKb3NlMRUwEwYDVQQKDAxHb29nbGUgSW5jLjEaMBgGA1UECwwRR29vZ2xl
+            IEZvbnRzMRgwFgYDVQQDDA9Hb29nbGUgRm9udHMgQ0EwggIiMA0GCSqGSIb3
+            DQEBAQUAA4ICDwAwggIKAoICAQC6Fh5+2aS6uRrU1Jt8nQ0g9Q3v3oJ2Qm1q
+            k3mG3Kq8o5lPpWm3c0o5o3k2mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7m
+            GqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJm7mGqgJ
+            m7mCAwEAAQ==
+        </item>
+    </string-array>
+</resources>

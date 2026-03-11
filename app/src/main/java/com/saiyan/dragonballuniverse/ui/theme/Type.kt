@@ -4,14 +4,39 @@ import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.googlefonts.GoogleFont
+import androidx.compose.ui.text.googlefonts.GoogleFont.Provider
+import androidx.compose.ui.text.googlefonts.Font
 import androidx.compose.ui.unit.sp
+import com.saiyan.dragonballuniverse.R
 
 /**
  * Typography:
- * - يفضّل ربط خط عربي (Cairo/Tajawal) عبر Resources لاحقاً.
- * - حالياً نستخدم FontFamily.SansSerif كبديل نظيف وحديث على أغلب الأجهزة.
+ * - ربط خط Cairo العربي عبر Google Fonts.
  */
-private val AppFontFamily = FontFamily.SansSerif
+private val CairoGoogleFont = GoogleFont("Cairo")
+
+/**
+ * Google Font Provider (استخدم شهادات جوجل الافتراضية عبر مكتبة ui-text-google-fonts).
+ *
+ * ملاحظة: يتطلب وجود certs داخل res/font:
+ * - com_google_android_gms_fonts_certs.xml
+ * - com_google_android_gms_fonts_certs_dev.xml
+ *
+ * لو لم تكن موجودة حالياً، سنضيفها في الخطوة القادمة داخل المشروع.
+ */
+private val GoogleFontsProvider: Provider = Provider(
+    providerAuthority = "com.google.android.gms.fonts",
+    providerPackage = "com.google.android.gms",
+    certificates = R.array.com_google_android_gms_fonts_certs
+)
+
+private val AppFontFamily = FontFamily(
+    Font(googleFont = CairoGoogleFont, fontProvider = GoogleFontsProvider, weight = FontWeight.Normal),
+    Font(googleFont = CairoGoogleFont, fontProvider = GoogleFontsProvider, weight = FontWeight.Medium),
+    Font(googleFont = CairoGoogleFont, fontProvider = GoogleFontsProvider, weight = FontWeight.SemiBold),
+    Font(googleFont = CairoGoogleFont, fontProvider = GoogleFontsProvider, weight = FontWeight.Bold),
+)
 
 val Typography = Typography(
     displaySmall = TextStyle(

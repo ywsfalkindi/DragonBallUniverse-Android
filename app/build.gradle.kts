@@ -66,6 +66,9 @@ dependencies {
     // Coil (AsyncImage)
     implementation("io.coil-kt:coil-compose:2.6.0")
 
+    // Google Fonts (Cairo)
+    implementation("androidx.compose.ui:ui-text-google-fonts:1.6.2")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
