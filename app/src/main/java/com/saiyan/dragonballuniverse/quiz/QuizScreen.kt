@@ -1,0 +1,516 @@
+package com.saiyan.dragonballuniverse.quiz
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.saiyan.dragonballuniverse.ui.theme.DarkBackground
+import com.saiyan.dragonballuniverse.ui.theme.GokuOrange
+import com.saiyan.dragonballuniverse.ui.theme.VegetaBlue
+import kotlin.math.max
+import kotlinx.coroutines.delay
+
+@Composable
+fun QuizMainScreen(
+    modifier: Modifier = Modifier,
+    viewModel: QuizViewModel,
+    bounceClick: (onClick: () -> Unit) -> Modifier
+) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val stats by viewModel.stats.collectAsStateWithLifecycle()
+    val session by viewModel.session.collectAsStateWithLifecycle()
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(DarkBackground)
+            .padding(16.dp)
+    ) {
+        when (val state = uiState) {
+            QuizUiState.Home -> {
+                QuizHomeContent(
+                    powerLevel = stats.powerLevel,
+                    senzuBeans = stats.senzuBeans,
+                    highestStreak = stats.highestStreak,
+                    onStart = { viewModel.startGame() },
+                    bounceClick = bounceClick
+                )
+            }
+
+            QuizUiState.Playing -> {
+                QuizPlayingContent(
+                    session = session,
+                    senzuBeans = stats.senzuBeans,
+                    onAnswer = { index -> viewModel.answer(index) },
+                    onTimeExpired = { viewModel.onTimeExpired() },
+                    bounceClick = bounceClick
+                )
+            }
+
+            is QuizUiState.GameOver -> {
+                QuizResultContent(
+                    title = "انتهت حبات السنزو!",
+                    subtitle = "حاول مرة أخرى غداً أو اجمع طاقة أكثر.",
+                    earnedPower = state.earnedPower,
+                    powerLevel = stats.powerLevel,
+                    onBack = { viewModel.backToHome() },
+                    bounceClick = bounceClick
+                )
+            }
+
+            is QuizUiState.Victory -> {
+                QuizResultContent(
+                    title = "أحسنت! أنهيت التحدي",
+                    subtitle = "استمر… قوتك تزداد مع كل معركة!",
+                    earnedPower = state.earnedPower,
+                    powerLevel = stats.powerLevel,
+                    onBack = { viewModel.backToHome() },
+                    bounceClick = bounceClick
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuizHomeContent(
+    powerLevel: Long,
+    senzuBeans: Int,
+    highestStreak: Int,
+    onStart: () -> Unit,
+    bounceClick: (onClick: () -> Unit) -> Modifier
+) {
+    val rankName = getRankName(powerLevel)
+
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "قسم التحديات",
+            color = Color.White,
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = "مستوى الطاقة",
+                    color = Color(0xFFBDBDBD),
+                    fontSize = 14.sp
+                )
+                Text(
+                    text = powerLevel.toString(),
+                    color = GokuOrange,
+                    fontSize = 40.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+
+                Text(
+                    text = "الرتبة: $rankName",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(top = 12.dp),
+                    color = Color.White.copy(alpha = 0.08f)
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "حبات السنزو",
+                            color = Color(0xFFBDBDBD),
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = "$senzuBeans / 3",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "أعلى ستريك",
+                            color = Color(0xFFBDBDBD),
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = highestStreak.toString(),
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        val startEnabled = senzuBeans > 0 // 0 Senzu: Disable button.
+        val startLabel =
+            if (startEnabled) "ابدأ التحدي"
+            else "لا توجد حبات سنزو"
+
+        Button(
+            onClick = onStart,
+            enabled = startEnabled,
+            modifier = bounceClick { onStart() }.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = VegetaBlue,
+                contentColor = Color.White,
+                disabledContainerColor = Color(0xFF2A2A2A),
+                disabledContentColor = Color.Gray
+            ),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Text(
+                text = startLabel,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(vertical = 6.dp)
+            )
+        }
+
+        Text(
+            text = "القواعد: عند الخطأ أو انتهاء الوقت → السؤال التالي مباشرة.",
+            color = Color(0xFFBDBDBD),
+            fontSize = 12.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 10.dp)
+        )
+    }
+}
+
+@Composable
+private fun QuizPlayingContent(
+    session: QuizSessionState?,
+    senzuBeans: Int,
+    onAnswer: (Int) -> Unit,
+    onTimeExpired: () -> Unit,
+    bounceClick: (onClick: () -> Unit) -> Modifier
+) {
+    val q = session?.currentQuestion
+    if (session == null || q == null) {
+        // Safety fallback (should not happen)
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(text = "جاري التحميل...", color = Color.White)
+        }
+        return
+    }
+
+    val haptic = LocalHapticFeedback.current
+
+    val totalMs = 15_000
+    var remainingMs by remember(q.id) { mutableIntStateOf(totalMs) }
+    var progress by remember(q.id) { mutableFloatStateOf(1f) }
+
+    // Local UI lock to prevent double taps.
+    var localAnswered by remember(q.id) { mutableStateOf(false) }
+
+    LaunchedEffect(q.id, localAnswered) {
+        if (localAnswered) return@LaunchedEffect
+
+        val tickMs = 250
+        remainingMs = totalMs
+        progress = 1f
+
+        while (remainingMs > 0 && !localAnswered) {
+            delay(tickMs.toLong())
+            remainingMs = max(0, remainingMs - tickMs)
+            progress = remainingMs.toFloat() / totalMs.toFloat()
+        }
+
+        if (!localAnswered) {
+            localAnswered = true
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            onTimeExpired()
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "سؤال ${session.currentIndex + 1} / ${session.questions.size}",
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "سنزو: $senzuBeans",
+                color = GokuOrange,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(8.dp),
+            color = GokuOrange,
+            trackColor = Color.White.copy(alpha = 0.12f)
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = q.text,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    lineHeight = 26.sp
+                )
+
+                Text(
+                    text = "الصعوبة: ${difficultyLabel(q.difficulty)}",
+                    color = Color(0xFFBDBDBD),
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 10.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        q.options.forEachIndexed { index, option ->
+            AnswerButton(
+                text = option,
+                enabled = !localAnswered,
+                modifier = Modifier.padding(bottom = 10.dp),
+                bounceClick = bounceClick
+            ) {
+                if (localAnswered) return@AnswerButton
+
+                localAnswered = true
+                val isCorrect = index == q.correctAnswerIndex
+                haptic.performHapticFeedback(
+                    if (isCorrect) HapticFeedbackType.TextHandleMove else HapticFeedbackType.LongPress
+                )
+                onAnswer(index)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = "القاعدة: خطأ = خصم سنزو + السؤال التالي",
+            color = Color(0xFFBDBDBD),
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
+}
+
+@Composable
+private fun AnswerButton(
+    text: String,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    bounceClick: (onClick: () -> Unit) -> Modifier,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (enabled) bounceClick { onClick() } else Modifier
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(14.dp))
+            .background(Color(0xFF161616), RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 14.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            text = text,
+            color = if (enabled) Color.White else Color.Gray,
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp
+        )
+    }
+}
+
+@Composable
+private fun QuizResultContent(
+    title: String,
+    subtitle: String,
+    earnedPower: Long,
+    powerLevel: Long,
+    onBack: () -> Unit,
+    bounceClick: (onClick: () -> Unit) -> Modifier
+) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = title,
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(
+                    text = subtitle,
+                    color = Color(0xFFBDBDBD),
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(top = 14.dp),
+                    color = Color.White.copy(alpha = 0.08f)
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(text = "الطاقة المكتسبة", color = Color(0xFFBDBDBD), fontSize = 12.sp)
+                        Text(
+                            text = earnedPower.toString(),
+                            color = GokuOrange,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 20.sp
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(text = "مستوى الطاقة الحالي", color = Color(0xFFBDBDBD), fontSize = 12.sp)
+                        Text(
+                            text = powerLevel.toString(),
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        Button(
+            onClick = onBack,
+            modifier = bounceClick { onBack() }.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = VegetaBlue, contentColor = Color.White),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Text(
+                text = "العودة",
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(vertical = 6.dp)
+            )
+        }
+    }
+}
+
+fun getRankName(powerLevel: Long): String =
+    when {
+        powerLevel < 1_000L -> "أرضي"
+        powerLevel < 10_000L -> "مقاتل"
+        powerLevel < 100_000L -> "مقاتل النخبة"
+        powerLevel < 1_000_000L -> "سوبر سايان"
+        powerLevel < 10_000_000L -> "سوبر سايان 2"
+        powerLevel < 100_000_000L -> "سوبر سايان 3"
+        else -> "غريزة فائقة"
+    }
+
+private fun difficultyLabel(diff: String): String =
+    when (diff) {
+        DIFF_EASY -> "سهل"
+        DIFF_MEDIUM -> "متوسط"
+        DIFF_HARD -> "صعب"
+        DIFF_INSANE -> "أسطوري"
+        else -> diff
+    }

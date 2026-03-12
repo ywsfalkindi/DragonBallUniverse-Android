@@ -1,11 +1,14 @@
 package com.saiyan.dragonballuniverse
 
+import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import com.saiyan.dragonballuniverse.quiz.QuizMainScreen
+import com.saiyan.dragonballuniverse.quiz.QuizViewModel
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -45,6 +48,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -65,12 +69,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.Saver as ComposeSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -95,16 +97,13 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.saiyan.dragonballuniverse.db.UserDatabase
-import com.saiyan.dragonballuniverse.db.UserEpisodeEntity
-import com.saiyan.dragonballuniverse.network.ApiEpisode
-import com.saiyan.dragonballuniverse.network.JikanRetrofitClient
 import com.saiyan.dragonballuniverse.ui.theme.DarkBackground
 import com.saiyan.dragonballuniverse.ui.theme.DragonBallUniverseTheme
 import com.saiyan.dragonballuniverse.ui.theme.GokuOrange
@@ -115,12 +114,19 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
+    private val mainViewModel: MainViewModel by viewModels()
+    private val quizViewModel: QuizViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             DragonBallUniverseTheme {
-                DragonBallScaffold()
+                DragonBallScaffold(
+                    viewModel = mainViewModel,
+                    quizViewModel = quizViewModel
+                )
             }
         }
     }
@@ -128,13 +134,14 @@ class MainActivity : ComponentActivity() {
 
 private enum class MainDestination {
     Anime,
-    Manga
+    Manga,
+    Quiz
 }
 
-private const val DEFAULT_DBZ_COVER_URL: String =
+const val DEFAULT_DBZ_COVER_URL: String =
     "https://j.top4top.io/p_3722xahg41.jpg"
 
-private data class Episode(
+data class Episode(
     val number: Int,
     val title: String,
     val duration: String,
@@ -173,7 +180,8 @@ private val EpisodeSaver: ComposeSaver<Episode, List<Any?>> =
                 episode.title,
                 episode.duration,
                 episode.imageUrl,
-                episode.progress
+                episode.progress,
+                episode.id
             )
         },
         restore = { saved ->
@@ -182,12 +190,14 @@ private val EpisodeSaver: ComposeSaver<Episode, List<Any?>> =
             val duration = saved.getOrElse(2) { null } as? String ?: return@ComposeSaver null
             val imageUrl = saved.getOrElse(3) { "" } as? String ?: ""
             val progress = saved.getOrElse(4) { 0f } as? Float ?: 0f
+            val id = saved.getOrElse(5) { number.toString() } as? String ?: number.toString()
             Episode(
                 number = number,
                 title = title,
                 duration = duration,
                 imageUrl = imageUrl.ifBlank { DEFAULT_DBZ_COVER_URL },
-                progress = progress.coerceIn(0f, 1f)
+                progress = progress.coerceIn(0f, 1f),
+                id = id
             )
         }
     )
@@ -244,6 +254,7 @@ private val NullableAnimeSeasonSaver: ComposeSaver<AnimeSeason?, Any> =
                     @Suppress("UNCHECKED_CAST")
                     with(AnimeSeasonSaver) { restore(saved as List<Any?>) }
                 }
+
                 else -> null
             }
         }
@@ -258,7 +269,6 @@ private fun statusBadgeColor(
         "قادم" -> Color(0xFFEF6C00)
         else -> Color(0xFF616161)
     }
-
 
 internal fun resolveImageUrl(
     primary: String?,
@@ -303,19 +313,6 @@ private fun ExpandableText(
     }
 }
 
-private fun mapApiEpisodesToUiEpisodes(
-    apiEpisodes: List<ApiEpisode>
-): List<Episode> =
-    apiEpisodes.mapIndexed { index, apiEpisode ->
-        Episode(
-            number = index + 1,
-            title = apiEpisode.title,
-            duration = "24 دقيقة",
-            imageUrl = DEFAULT_DBZ_COVER_URL,
-            progress = ((index % 10) + 1) / 10f
-        )
-    }
-
 private fun clampPanOffset(
     offset: Offset,
     scale: Float,
@@ -337,7 +334,7 @@ private fun clampPanOffset(
  * - onPress: scale to 0.95f + haptic
  * - onRelease: scale back to 1f then trigger onClick
  */
-private fun Modifier.bounceClick(
+internal fun Modifier.bounceClick(
     onClick: () -> Unit
 ): Modifier = composed {
     val haptic = LocalHapticFeedback.current
@@ -457,7 +454,9 @@ private fun VideoPlayerScreen(
     episodeId: String,
     videoUrl: String,
     onPlayNext: (String, String) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    getSavedProgressMs: suspend (String) -> Long?,
+    saveWatchProgress: (String, Long) -> Unit
 ) {
     if (videoUrl.isBlank()) {
         onBack()
@@ -465,7 +464,7 @@ private fun VideoPlayerScreen(
     }
 
     val context = LocalContext.current
-    val activity = LocalActivity.current
+    val activity = context as? Activity
 
     DisposableEffect(activity) {
         val job: Job? =
@@ -484,12 +483,9 @@ private fun VideoPlayerScreen(
         }
     }
 
-    val db = remember(context) { UserDatabase.getInstance(context) }
-    val dao = remember(db) { db.episodeDao() }
-
-    // Smart Resume: load progress from DB once per episode
+    // Smart Resume: load progress once per episode (no DB access inside UI)
     val savedProgressMs by produceState<Long?>(initialValue = null, key1 = episodeId) {
-        value = dao.getWatchProgress(episodeId)
+        value = getSavedProgressMs(episodeId)
     }
 
     val player = remember(videoUrl) {
@@ -529,19 +525,16 @@ private fun VideoPlayerScreen(
     // Save watch progress silently each 5 seconds
     DisposableEffect(player, episodeId) {
         val job =
-            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            kotlinx.coroutines.CoroutineScope(Dispatchers.Main.immediate).launch {
                 while (true) {
                     delay(5000)
-                    saveWatchProgress(dao = dao, episodeId = episodeId, progressMs = player.currentPosition)
+                    saveWatchProgress(episodeId, player.currentPosition)
                 }
             }
 
         onDispose {
             job.cancel()
-            // last save on dispose (silent)
-            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-                saveWatchProgress(dao = dao, episodeId = episodeId, progressMs = player.currentPosition)
-            }
+            saveWatchProgress(episodeId, player.currentPosition)
         }
     }
 
@@ -575,25 +568,6 @@ private fun VideoPlayerScreen(
     }
 }
 
-private suspend fun saveWatchProgress(
-    dao: com.saiyan.dragonballuniverse.db.EpisodeDao,
-    episodeId: String,
-    progressMs: Long
-) {
-    val existing = dao.getEpisode(episodeId)
-    val entity =
-        if (existing == null) {
-            UserEpisodeEntity(
-                episodeId = episodeId,
-                isFavorite = false,
-                watchProgress = progressMs
-            )
-        } else {
-            existing.copy(watchProgress = progressMs)
-        }
-    dao.upsert(entity)
-}
-
 private val dragonBallManga = Manga(
     title = "دراغون بول",
     description = "وصف عربي مناسب يعرّف بعالم دراغون بول وبداية مغامرات غوكو ورحلة كرات التنين.",
@@ -606,9 +580,11 @@ private val dragonBallManga = Manga(
     )
 )
 
-
 @Composable
-private fun DragonBallScaffold() {
+private fun DragonBallScaffold(
+    viewModel: MainViewModel,
+    quizViewModel: QuizViewModel
+) {
     var selectedDestination by rememberSaveable { mutableStateOf(MainDestination.Anime) }
 
     var isSearchMode by rememberSaveable { mutableStateOf(false) }
@@ -635,6 +611,8 @@ private fun DragonBallScaffold() {
         }
     ) { innerPadding ->
         DragonBallHomeContent(
+            viewModel = viewModel,
+            quizViewModel = quizViewModel,
             selectedDestination = selectedDestination,
             searchQuery = searchQuery,
             modifier = Modifier.padding(innerPadding)
@@ -714,11 +692,27 @@ private fun DragonBallBottomBar(
                 indicatorColor = Color.Transparent
             )
         )
+
+        NavigationBarItem(
+            selected = selected == MainDestination.Quiz,
+            onClick = { onSelect(MainDestination.Quiz) },
+            icon = { Icon(imageVector = Icons.Filled.Star, contentDescription = "تحديات") },
+            label = { Text("تحديات") },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = GokuOrange,
+                selectedTextColor = GokuOrange,
+                unselectedIconColor = Color.Gray,
+                unselectedTextColor = Color.Gray,
+                indicatorColor = Color.Transparent
+            )
+        )
     }
 }
 
 @Composable
 private fun DragonBallHomeContent(
+    viewModel: MainViewModel,
+    quizViewModel: QuizViewModel,
     selectedDestination: MainDestination,
     searchQuery: String,
     modifier: Modifier = Modifier
@@ -730,29 +724,15 @@ private fun DragonBallHomeContent(
     var selectedManga by rememberSaveable { mutableStateOf<Manga?>(null) }
     var selectedMangaChapterNumber by rememberSaveable { mutableStateOf<String?>(null) }
 
-    var episodesList by remember { mutableStateOf<List<ApiEpisode>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    val fetchTrigger = rememberSaveable { mutableIntStateOf(0) }
-
-    LaunchedEffect(fetchTrigger.intValue) {
-        isLoading = true
-        errorMessage = null
-
-        try {
-            val response = JikanRetrofitClient.apiService.getDragonBallEpisodes()
-            episodesList = response.data
-        } catch (e: Exception) {
-            errorMessage = e.message ?: "Unknown error"
-            e.printStackTrace()
-        } finally {
-            isLoading = false
+    val episodes: List<Episode> =
+        when (val state = uiState) {
+            is UiState.Success -> state.episodes
+            else -> emptyList()
         }
-    }
 
     if (selectedVideoUrl != null && selectedEpisodeId != null) {
-        val currentEpisodesSnapshot = episodesList
         val sampleUrlSnapshot =
             "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
 
@@ -760,15 +740,20 @@ private fun DragonBallHomeContent(
             episodeId = selectedEpisodeId!!,
             videoUrl = selectedVideoUrl!!,
             onPlayNext = { currentId, _ ->
-                val uiEpisodes = mapApiEpisodesToUiEpisodes(currentEpisodesSnapshot)
-                val currentIndex = uiEpisodes.indexOfFirst { it.id == currentId }
-                val next = uiEpisodes.getOrNull(currentIndex + 1) ?: return@VideoPlayerScreen
+                val currentIndex = episodes.indexOfFirst { it.id == currentId }
+                val next = episodes.getOrNull(currentIndex + 1) ?: return@VideoPlayerScreen
                 selectedEpisodeId = next.id
                 selectedVideoUrl = sampleUrlSnapshot
             },
             onBack = {
                 selectedVideoUrl = null
                 selectedEpisodeId = null
+            },
+            getSavedProgressMs = { id ->
+                viewModel.watchProgressMsFlow(id).value
+            },
+            saveWatchProgress = { id, progress ->
+                viewModel.saveWatchProgress(id, progress)
             }
         )
         return
@@ -784,35 +769,30 @@ private fun DragonBallHomeContent(
     val sampleUrl =
         "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
 
+    val filteredEpisodesList =
+        if (searchQuery.isBlank()) {
+            episodes
+        } else {
+            val q = searchQuery.trim()
+            episodes.filter { it.title.contains(q, ignoreCase = true) }
+        }
+
     val dbzSeason =
         AnimeSeason(
             title = "دراغون بول زد",
             year = "1989",
             description = "وصول السايانز إلى الأرض ومعارك ملحمية لإنقاذ الكون.",
-            episodes = mapApiEpisodesToUiEpisodes(episodesList),
+            episodes = filteredEpisodesList,
             imageUrl = DEFAULT_DBZ_COVER_URL,
             status = "مكتمل"
         )
 
-    val filteredEpisodesList =
-        if (searchQuery.isBlank()) {
-            episodesList
-        } else {
-            val q = searchQuery.trim()
-            episodesList.filter { it.title.contains(q, ignoreCase = true) }
-        }
-
-    val seasonsToShow =
-        listOf(
-            dbzSeason.copy(
-                episodes = mapApiEpisodesToUiEpisodes(filteredEpisodesList)
-            )
-        )
+    val seasonsToShow = listOf(dbzSeason)
 
     when (selectedDestination) {
         MainDestination.Anime -> {
-            when {
-                isLoading -> {
+            when (uiState) {
+                UiState.Loading -> {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(2),
                         modifier = modifier
@@ -828,31 +808,38 @@ private fun DragonBallHomeContent(
                     }
                 }
 
-                errorMessage != null -> {
+                is UiState.Error -> {
+                    val message = (uiState as UiState.Error).message
                     NetworkErrorScreen(
-                        errorMessage = errorMessage ?: "Unknown error",
-                        onRetry = { fetchTrigger.intValue++ }
+                        errorMessage = message,
+                        onRetry = { viewModel.fetchEpisodes() }
                     )
                 }
 
-                selectedSeason == null -> {
-                    AnimeSeasonsScreen(
-                        seasons = seasonsToShow,
-                        onSeasonClick = { selectedSeason = it },
-                        modifier = modifier
-                    )
-                }
-
-                else -> {
-                    SeasonDetailsScreen(
-                        season = selectedSeason!!,
-                        onBack = { selectedSeason = null },
-                        onEpisodeClick = { ep ->
-                            selectedEpisodeId = ep.id
-                            selectedVideoUrl = sampleUrl
-                        },
-                        modifier = modifier
-                    )
+                is UiState.Success -> {
+                    if (selectedSeason == null) {
+                        AnimeSeasonsScreen(
+                            seasons = seasonsToShow,
+                            onSeasonClick = { selectedSeason = it },
+                            modifier = modifier
+                        )
+                    } else {
+                        SeasonDetailsScreen(
+                            season = selectedSeason!!,
+                            onBack = { selectedSeason = null },
+                            onEpisodeClick = { ep ->
+                                selectedEpisodeId = ep.id
+                                selectedVideoUrl = sampleUrl
+                            },
+                            modifier = modifier,
+                            isFavoriteProvider = { episodeId ->
+                                viewModel.isFavoriteFlow(episodeId).value
+                            },
+                            onToggleFavorite = { episodeId, isFav ->
+                                viewModel.toggleFavorite(episodeId, isFav)
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -867,6 +854,14 @@ private fun DragonBallHomeContent(
                 onChapterClick = { chapter ->
                     selectedMangaChapterNumber = chapter.number
                 }
+            )
+        }
+
+        MainDestination.Quiz -> {
+            QuizMainScreen(
+                modifier = modifier,
+                viewModel = quizViewModel,
+                bounceClick = { onClick -> Modifier.bounceClick(onClick) }
             )
         }
     }
@@ -1139,7 +1134,9 @@ private fun SeasonDetailsScreen(
     season: AnimeSeason,
     onBack: () -> Unit,
     onEpisodeClick: (Episode) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isFavoriteProvider: (String) -> Boolean,
+    onToggleFavorite: (String, Boolean) -> Unit
 ) {
     val bannerHeight = 280.dp
     val posterWidth = 150.dp
@@ -1347,7 +1344,11 @@ private fun SeasonDetailsScreen(
             EpisodeRowCard(
                 episode = episode,
                 onClick = { onEpisodeClick(episode) },
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                isFavorite = isFavoriteProvider(episode.id),
+                onToggleFavorite = { checked ->
+                    onToggleFavorite(episode.id, checked)
+                }
             )
         }
     }
@@ -1425,17 +1426,10 @@ private fun NetworkErrorScreen(
 private fun EpisodeRowCard(
     episode: Episode,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isFavorite: Boolean,
+    onToggleFavorite: (Boolean) -> Unit
 ) {
-    val context = LocalContext.current
-    val db = remember(context) { UserDatabase.getInstance(context) }
-    val dao = remember(db) { db.episodeDao() }
-    val episodeId = remember(episode.id) { episode.id }
-
-    val isFavorite by produceState<Boolean>(initialValue = false, key1 = episodeId) {
-        value = dao.isFavorite(episodeId) ?: false
-    }
-
     val favoriteTint = if (isFavorite) Color(0xFFE53935) else Color(0xFF9E9E9E)
 
     Card(
@@ -1480,20 +1474,7 @@ private fun EpisodeRowCard(
                     IconToggleButton(
                         checked = isFavorite,
                         onCheckedChange = { checked ->
-                            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-                                val existing = dao.getEpisode(episodeId)
-                                val updated =
-                                    if (existing == null) {
-                                        UserEpisodeEntity(
-                                            episodeId = episodeId,
-                                            isFavorite = checked,
-                                            watchProgress = 0L
-                                        )
-                                    } else {
-                                        existing.copy(isFavorite = checked)
-                                    }
-                                dao.upsert(updated)
-                            }
+                            onToggleFavorite(checked)
                         }
                     ) {
                         Icon(
