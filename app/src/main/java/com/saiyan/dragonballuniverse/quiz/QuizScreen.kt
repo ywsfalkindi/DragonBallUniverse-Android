@@ -15,12 +15,24 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -30,14 +42,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.saiyan.dragonballuniverse.R
+import com.saiyan.dragonballuniverse.quiz.audio.QuizSfx
+import com.saiyan.dragonballuniverse.quiz.audio.SoundPoolSoundManager
+import com.saiyan.dragonballuniverse.quiz.ui.QuizDifficultyBackground
+import com.saiyan.dragonballuniverse.quiz.ui.difficultyToUiTier
 import com.saiyan.dragonballuniverse.ui.theme.DarkBackground
 import com.saiyan.dragonballuniverse.ui.theme.GokuOrange
 import com.saiyan.dragonballuniverse.ui.theme.VegetaBlue
@@ -54,14 +73,14 @@ fun QuizMainScreen(
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val session by viewModel.session.collectAsStateWithLifecycle()
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(DarkBackground)
-            .padding(16.dp)
-    ) {
-        when (val state = uiState) {
-            QuizUiState.Home -> {
+    when (val state = uiState) {
+        QuizUiState.Home -> {
+            Box(
+                modifier = modifier
+                    .fillMaxSize()
+                    .background(DarkBackground)
+                    .padding(16.dp)
+            ) {
                 QuizHomeContent(
                     powerLevel = stats.powerLevel,
                     senzuBeans = stats.senzuBeans,
@@ -70,8 +89,16 @@ fun QuizMainScreen(
                     bounceClick = bounceClick
                 )
             }
+        }
 
-            QuizUiState.Playing -> {
+        QuizUiState.Playing -> {
+            val tier = difficultyToUiTier(session?.currentQuestion?.difficulty ?: "")
+            QuizDifficultyBackground(
+                tier = tier,
+                modifier = modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+            ) {
                 QuizPlayingContent(
                     session = session,
                     senzuBeans = stats.senzuBeans,
@@ -80,8 +107,15 @@ fun QuizMainScreen(
                     bounceClick = bounceClick
                 )
             }
+        }
 
-            is QuizUiState.GameOver -> {
+        is QuizUiState.GameOver -> {
+            Box(
+                modifier = modifier
+                    .fillMaxSize()
+                    .background(DarkBackground)
+                    .padding(16.dp)
+            ) {
                 QuizResultContent(
                     title = "انتهت حبات السنزو!",
                     subtitle = "حاول مرة أخرى غداً أو اجمع طاقة أكثر.",
@@ -91,8 +125,15 @@ fun QuizMainScreen(
                     bounceClick = bounceClick
                 )
             }
+        }
 
-            is QuizUiState.Victory -> {
+        is QuizUiState.Victory -> {
+            Box(
+                modifier = modifier
+                    .fillMaxSize()
+                    .background(DarkBackground)
+                    .padding(16.dp)
+            ) {
                 QuizResultContent(
                     title = "أحسنت! أنهيت التحدي",
                     subtitle = "استمر… قوتك تزداد مع كل معركة!",
@@ -261,6 +302,18 @@ private fun QuizPlayingContent(
     }
 
     val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+
+    val soundManager = remember {
+        SoundPoolSoundManager(
+            context = context,
+            correctRes = R.raw.quiz_correct,
+            wrongRes = R.raw.quiz_wrong
+        )
+    }
+    DisposableEffect(Unit) {
+        onDispose { soundManager.release() }
+    }
 
     val totalMs = 15_000
     var remainingMs by remember(q.id) { mutableIntStateOf(totalMs) }
@@ -268,6 +321,20 @@ private fun QuizPlayingContent(
 
     // Local UI lock to prevent double taps.
     var localAnswered by remember(q.id) { mutableStateOf(false) }
+
+    val isUrgent = remainingMs <= 5_000
+    val infiniteTransition = rememberInfiniteTransition(label = "quiz_timer_blink")
+    val blinkAlpha by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.35f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 450),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "quiz_timer_blink_alpha"
+    )
+    val urgencyAlpha = if (isUrgent) blinkAlpha else 1f
+    val timerColor = if (isUrgent) Color(0xFFFF3B30) else GokuOrange
 
     LaunchedEffect(q.id, localAnswered) {
         if (localAnswered) return@LaunchedEffect
@@ -284,6 +351,7 @@ private fun QuizPlayingContent(
 
         if (!localAnswered) {
             localAnswered = true
+            soundManager.play(QuizSfx.Wrong)
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             onTimeExpired()
         }
@@ -315,58 +383,74 @@ private fun QuizPlayingContent(
             progress = { progress },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(8.dp),
-            color = GokuOrange,
+                .height(8.dp)
+                .alpha(urgencyAlpha),
+            color = timerColor,
             trackColor = Color.White.copy(alpha = 0.12f)
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
-                Text(
-                    text = q.text,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    lineHeight = 26.sp
+        AnimatedContent(
+            targetState = q.id,
+            transitionSpec = {
+                ContentTransform(
+                    targetContentEnter = slideInHorizontally { it / 3 } + fadeIn(animationSpec = tween(220)),
+                    initialContentExit = slideOutHorizontally { -it / 3 } + fadeOut(animationSpec = tween(160)),
+                    sizeTransform = null
                 )
+            },
+            label = "quiz_question_transition"
+        ) { _ ->
+            Column {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    ) {
+                        Text(
+                            text = q.text,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            lineHeight = 26.sp
+                        )
 
-                Text(
-                    text = "الصعوبة: ${difficultyLabel(q.difficulty)}",
-                    color = Color(0xFFBDBDBD),
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(top = 10.dp)
-                )
-            }
-        }
+                        Text(
+                            text = "الصعوبة: ${difficultyLabel(q.difficulty)}",
+                            color = Color(0xFFBDBDBD),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 10.dp)
+                        )
+                    }
+                }
 
-        Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-        q.options.forEachIndexed { index, option ->
-            AnswerButton(
-                text = option,
-                enabled = !localAnswered,
-                modifier = Modifier.padding(bottom = 10.dp),
-                bounceClick = bounceClick
-            ) {
-                if (localAnswered) return@AnswerButton
+                q.options.forEachIndexed { index, option ->
+                    AnswerButton(
+                        text = option,
+                        enabled = !localAnswered,
+                        modifier = Modifier.padding(bottom = 10.dp),
+                        bounceClick = bounceClick
+                    ) {
+                        if (localAnswered) return@AnswerButton
 
-                localAnswered = true
-                val isCorrect = index == q.correctAnswerIndex
-                haptic.performHapticFeedback(
-                    if (isCorrect) HapticFeedbackType.TextHandleMove else HapticFeedbackType.LongPress
-                )
-                onAnswer(index)
+                        localAnswered = true
+                        val isCorrect = index == q.correctAnswerIndex
+                        soundManager.play(if (isCorrect) QuizSfx.Correct else QuizSfx.Wrong)
+                        haptic.performHapticFeedback(
+                            if (isCorrect) HapticFeedbackType.TextHandleMove else HapticFeedbackType.LongPress
+                        )
+                        onAnswer(index)
+                    }
+                }
             }
         }
 

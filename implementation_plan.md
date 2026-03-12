@@ -1,402 +1,274 @@
 # Implementation Plan
 
 [Overview]  
-إضافة قسم “تحديات” (Quiz) داخل تطبيق DragonBallUniverse عبر Jetpack Compose + Room لتقديم تجربة أسئلة تفاعلية بأسلوب “مقياس الكشاف/غرفة الروح والزمن” مع حفظ تقدم اللاعب (مستوى الطاقة، حبات السنزو، الستريك) محلياً.
+Implement Phase 1 of the Quiz overhaul by adding animated question transitions, an urgency-aware timer, sound effects for answer feedback, and difficulty-driven dynamic backgrounds, while keeping the existing MVVM + Room stats flow intact.
 
-سيتم دمج وجهة ثالثة في التنقل السفلي (Bottom Bar) داخل `MainActivity.kt` دون حذف أي كود موجود (مشغل الفيديو/المانغا/الأنمي)، وإضافة شاشة Quiz منفصلة منظمة في ملف جديد (مثلاً `QuizScreen.kt`) بحيث تعمل ضمن نفس `Scaffold` الحالي.  
-سيتم تحديث قاعدة بيانات Room الحالية (المستخدمة للمفضلة وتقدم المشاهدة) بإضافة كيان جديد `UserStatsEntity` و DAO جديد `UserStatsDao` مع رفع نسخة قاعدة البيانات إلى `version = 2` مع `fallbackToDestructiveMigration()` (كما هو أسلوب المشروع حالياً) لتفادي تعقيد Migration في هذه الإضافة الضخمة.
+This phase focuses purely on “feel”: smooth UI motion, clear time pressure, immediate feedback, and stronger visual theming per question difficulty. It intentionally avoids Phase 2+ features (currency/lifelines/adaptive difficulty/Firebase/NTP/leaderboards) so the rollout is incremental and low-risk.
 
-اللعبة ستكون “جلسة تحدّي” تسحب مجموعة أسئلة عشوائية من بنك أسئلة (نبدأ بـ 10 أسئلة) مع خلط ترتيب الأسئلة وخيارات الإجابة داخل كل سؤال. سيتم بناء منطق لعب واضح: مؤقت لكل سؤال، مكافآت طاقة حسب الصعوبة، خصم حبة سنزو عند الخطأ/انتهاء الوقت، شاشة Game Over عند نفاد السنزو، وشاشة انتصار عند إنهاء كل الأسئلة مع ملخص المكاسب.  
-ستُستخدم ألوان الثيم الحالية (`GokuOrange`, `VegetaBlue`, `DarkBackground`) مع نصوص عربية بالكامل، وسيتم الاستفادة من `modifier.bounceClick` الموجود مسبقاً داخل `MainActivity.kt` لتوحيد تجربة اللمس.
+The current Quiz feature uses `QuizViewModel` (state machine via `QuizUiState` + `QuizSessionState`) and `QuizMainScreen` / `QuizPlayingContent` for UI, with local `dummyQuestions` and `Room` persistence via `UserStatsDao`. Phase 1 will extend the UI layer (Compose) and add a small audio utility, with minimal changes to domain logic. Where logic is required (e.g., “play success/fail sound”), it will be done in a UI-friendly, lifecycle-safe way.
+
+Key principles:
+- No change to quiz rules, question source, or persistence schema in Phase 1.
+- Compose-only changes should be deterministic and keyed by `q.id` to avoid timer/animation glitches.
+- Sounds are short SFX → use `SoundPool` (per user preference).
+- Background selection is purely visual and derived from `QuizQuestion.difficulty`.
 
 [Types]  
-إضافة أنواع جديدة (Room Entity/Dao + نماذج بيانات Quiz + حالات UI) لدعم تخزين إحصائيات المستخدم ومحرك الاختبار.
+Introduce small Phase-1-only UI and audio support types without changing existing database entities.
 
-## Room Entities
+New / updated types:
 
-### `UserStatsEntity`
-**المسار:** `app/src/main/java/com/saiyan/dragonballuniverse/db/UserStatsEntity.kt`  
-```kotlin
-@Entity(tableName = "user_stats")
-data class UserStatsEntity(
-    @PrimaryKey val userId: String = "main_user",
-    val powerLevel: Long = 5L,
-    val senzuBeans: Int = 3,
-    val highestStreak: Int = 0,
-    val lastPlayedTimestamp: Long = 0L
-)
-```
+1) `enum class QuizDifficultyUiTier`
+- Purpose: normalize difficulty strings into stable tiers for UI mapping.
+- Values:
+  - `EASY`
+  - `MEDIUM`
+  - `HARD`
+  - `INSANE`
+  - `UNKNOWN`
+- Mapping rule:
+  - From `QuizQuestion.difficulty` string:
+    - `DIFF_EASY` → `EASY`
+    - `DIFF_MEDIUM` → `MEDIUM`
+    - `DIFF_HARD` → `HARD`
+    - `DIFF_INSANE` → `INSANE`
+    - else → `UNKNOWN`
 
-**قواعد تحقق/علاقات:**
-- `userId` ثابت على `"main_user"` لأن التطبيق حالياً Single-user محلي.
-- `powerLevel` لا يقل عن 0 (سيتم فرضه في منطق التحديث: `coerceAtLeast(0)`).
-- `senzuBeans` بين 0 و 3 (فرض داخل منطق التحديث: `coerceIn(0, 3)`).
-- `lastPlayedTimestamp` يمثل آخر وقت لعب/آخر وقت تم فيه إعادة تعبئة السنزو (سيُستخدم للمقارنة اليومية).
+2) `data class QuizBackgroundStyle`
+- Purpose: provide a consistent container of background styling inputs for Compose.
+- Fields:
+  - `val colors: List<Color>` (2–3 colors for gradient)
+  - `val accent: Color` (used for border/highlights)
+  - `val overlayAlpha: Float` (0.0–1.0) optional dimming
+- Validation:
+  - `colors.isNotEmpty()`
+  - `overlayAlpha` clamped to `[0f, 1f]`
 
-## Room DAO
+3) `sealed class QuizSfx`
+- Purpose: identify which sound to play.
+- Variants:
+  - `data object Correct : QuizSfx`
+  - `data object Wrong : QuizSfx`
 
-### `UserStatsDao`
-**المسار:** `app/src/main/java/com/saiyan/dragonballuniverse/db/UserStatsDao.kt`  
-الدوال المطلوبة (سنعتمد `suspend` لأن المشروع يستخدم `Dispatchers.IO` داخل ViewModel):
+4) `interface SoundManager`
+- Purpose: abstraction for sound playback, allowing future replacement/testing.
+- Functions:
+  - `fun play(sfx: QuizSfx)`
+  - `fun release()`
 
-- `suspend fun getStats(userId: String = "main_user"): UserStatsEntity?`
-- `suspend fun upsert(stats: UserStatsEntity)`
-- `suspend fun updatePowerLevel(userId: String = "main_user", powerLevel: Long)`
-- `suspend fun updateSenzuBeans(userId: String = "main_user", senzuBeans: Int)`
-- `suspend fun updateHighestStreak(userId: String = "main_user", highestStreak: Int)`
-- `suspend fun updateLastPlayedTimestamp(userId: String = "main_user", timestamp: Long)`
+5) `class SoundPoolSoundManager(...) : SoundManager`
+- Purpose: SoundPool-backed implementation.
 
-ملاحظة: بدل “تحديث الـ Streak” الغامضة سنحفظ `highestStreak` (أعلى ستريك) في DB كما طلبت، بينما “الستريك الحالي” سيكون ضمن حالة الجلسة (in-memory) لأنه متعلق بجلسة اللعب الحالية.
-
-## Quiz Models
-
-### `QuizQuestion`
-**المسار:** `app/src/main/java/com/saiyan/dragonballuniverse/quiz/QuizQuestion.kt` (أو داخل `QuizScreen.kt` إن رغبت بتجميع بسيط)
-```kotlin
-data class QuizQuestion(
-    val id: Int,
-    val text: String,
-    val options: List<String>,
-    val correctAnswerIndex: Int,
-    val difficulty: String // Easy, Medium, Hard, Insane
-)
-```
-
-**قيود:**
-- `options.size == 4` دائماً.
-- `correctAnswerIndex` بين 0..3.
-- `difficulty` ستكون String كما طلبت، لكن سنستخدم ثوابت داخلية لتفادي الأخطاء:
-  - `const val DIFF_EASY = "Easy"`, ... إلخ.
-
-### `dummyQuestions`
-**المسار:** نفس ملف الموديل  
-قائمة 10 أسئلة عربية “حقيقية” متدرجة الصعوبة. سيتم في منطق اللعبة:
-- خلط ترتيب الأسئلة: `questions.shuffled()`
-- خلط الخيارات لكل سؤال مع إعادة حساب `correctAnswerIndex` بعد الخلط.
-
-## UI State Types
-
-### `QuizUiState`
-**المسار:** `app/src/main/java/com/saiyan/dragonballuniverse/quiz/QuizUiState.kt` (أو داخل `QuizViewModel.kt`)
-```kotlin
-sealed interface QuizUiState {
-    data object Home : QuizUiState
-    data object Playing : QuizUiState
-    data class GameOver(val earnedPower: Long) : QuizUiState
-    data class Victory(val earnedPower: Long) : QuizUiState
-}
-```
-
-### `QuizSessionState` (حالة جلسة اللعب)
-```kotlin
-data class QuizSessionState(
-    val questions: List<QuizQuestion>,
-    val currentIndex: Int,
-    val currentStreak: Int,
-    val earnedPower: Long,
-    val isAnswered: Boolean
-)
-```
+No changes in Phase 1 to:
+- `UserStatsEntity`
+- `UserStatsDao`
+- `QuizSessionState` fields
+- `QuizUiState` variants
+- `QuizQuestion` schema
 
 [Files]  
-تحديث ملفات التنقل الحالية + إضافة ملفات Quiz + تحديث Room DB إلى version 2 مع DAO/Entity جديدة.
+Modify the quiz UI and add a dedicated sound manager with raw audio resources.
 
-## ملفات جديدة (New)
-1. `app/src/main/java/com/saiyan/dragonballuniverse/db/UserStatsEntity.kt`  
-   - كيان Room لإحصائيات اللاعب.
+Existing files to be modified:
 
-2. `app/src/main/java/com/saiyan/dragonballuniverse/db/UserStatsDao.kt`  
-   - واجهة DAO لاسترجاع/تحديث الإحصائيات.
+1) `app/src/main/java/com/saiyan/dragonballuniverse/quiz/QuizScreen.kt`
+- Add `AnimatedContent` around the question card + options so each question transition animates (slide/fade or scale/fade).
+- Update timer UI:
+  - Keep existing 15s logic but add:
+    - urgency detection for last 5 seconds (remainingMs <= 5000)
+    - `animateColorAsState` to shift progress color from normal (e.g., `GokuOrange`) to red.
+    - blinking effect in last 5 seconds (alpha pulsing) using an infinite transition.
+- Integrate SoundManager usage:
+  - Create/remember `SoundPoolSoundManager` in `QuizPlayingContent` (or higher) and release via `DisposableEffect`.
+  - On answer selection:
+    - If correct → play `QuizSfx.Correct`
+    - Else → play `QuizSfx.Wrong`
+  - On time expiry treat as wrong → play `QuizSfx.Wrong` once.
+- Add dynamic backgrounds driven by difficulty:
+  - Replace the fixed `DarkBackground` in the playing screen container with a per-question background (e.g., gradient).
+  - Ensure home/results screens remain unchanged (still `DarkBackground`) unless explicitly desired.
 
-3. `app/src/main/java/com/saiyan/dragonballuniverse/quiz/QuizQuestion.kt`  
-   - `QuizQuestion` + `dummyQuestions` + أدوات الخلط (shuffle).
+2) `app/src/main/java/com/saiyan/dragonballuniverse/quiz/QuizViewModel.kt`
+- No behavioral changes required for Phase 1.
+- Optional minimal addition (only if needed for cleaner UI triggers):
+  - Expose last answer result in session state (NOT required; prefer local UI decision based on correctness already computed in `QuizScreen`).
 
-4. `app/src/main/java/com/saiyan/dragonballuniverse/quiz/QuizScreen.kt`  
-   - `@Composable fun QuizMainScreen(...)` وجميع واجهات Home/Playing/GameOver/Victory.
-   - دالة `getRankName(powerLevel: Long): String`.
-   - منطق المؤقت (15 ثانية) باستخدام `LaunchedEffect`.
+3) `app/src/main/java/com/saiyan/dragonballuniverse/db/UserStatsDao.kt`
+- No changes in Phase 1.
 
-5. (اختياري لكنه أنظف) `app/src/main/java/com/saiyan/dragonballuniverse/quiz/QuizViewModel.kt`  
-   - ViewModel خاص بالـ Quiz لإدارة الحالة + Room IO.
-   - إن لم نضفه سنستخدم `rememberCoroutineScope` داخل `QuizMainScreen`، لكن الأفضل ViewModel لتفادي فقدان الحالة عند إعادة التركيب/تغيير التوجيه.
+New files to be created:
 
-## ملفات معدلة (Modify)
-1. `app/src/main/java/com/saiyan/dragonballuniverse/db/UserDatabase.kt`
-   - إضافة `UserStatsEntity` إلى `entities`.
-   - رفع `version` من 1 إلى 2.
-   - إضافة `abstract fun userStatsDao(): UserStatsDao`
+1) `app/src/main/java/com/saiyan/dragonballuniverse/quiz/audio/SoundManager.kt`
+- Define `QuizSfx`, `SoundManager` interface, and `SoundPoolSoundManager` implementation.
 
-2. `app/src/main/java/com/saiyan/dragonballuniverse/MainActivity.kt`
-   - تعديل `MainDestination` لإضافة `Quiz`.
-   - تعديل `DragonBallBottomBar` لإضافة `NavigationBarItem` ثالث بأيقونة `Icons.Filled.Star` (أو `EmojiEvents` إن لزم) مع Label "تحديات".
-   - تعديل `DragonBallHomeContent` لإضافة فرع `MainDestination.Quiz` يعرض `QuizMainScreen(...)`.
-   - تمرير `viewModel` أو DB instance/dao إلى `QuizMainScreen`.
+2) `app/src/main/java/com/saiyan/dragonballuniverse/quiz/ui/QuizBackgrounds.kt`
+- Provide:
+  - difficulty → `QuizBackgroundStyle` mapping
+  - helper to normalize difficulty strings to `QuizDifficultyUiTier`
 
-3. `app/src/main/java/com/saiyan/dragonballuniverse/MainViewModel.kt` (اختياري)
-   - إمّا تركه كما هو وإضافة `QuizViewModel` منفصل.
-   - أو توسيعه ليحمل `UserStatsDao`، لكن ذلك سيخلط المسؤوليات. الخطة الافتراضية: `QuizViewModel` منفصل.
+New resources to be created:
 
-## ملفات تُحذف/تُنقل
-- لا شيء.
+1) `app/src/main/res/raw/quiz_correct.mp3` (or `.wav` / `.ogg`)
+2) `app/src/main/res/raw/quiz_wrong.mp3`
 
-## تحديثات إعدادات/Gradle
-- لا يُتوقع إضافة dependencies جديدة: المشروع يحتوي Room + Compose + material-icons-extended بالفعل.
-- فقط التأكد من وجود `material-icons-extended` (موجود) لأيقونة `Star`.
+Configuration files to be modified:
+
+1) `app/build.gradle.kts`
+- Ensure `android {}` has `buildFeatures { compose = true }` already (likely present).
+- Add nothing for SoundPool (platform API), but ensure `res/raw` inclusion is standard (no config needed).
+- If `AnimatedContent` requires a newer Compose animation artifact than currently used, bump Compose BOM / versions in:
+  - `gradle/libs.versions.toml` and/or `app/build.gradle.kts`
+  - Only if compilation reveals missing symbols.
+
+Files to be deleted/moved:
+- None in Phase 1.
 
 [Functions]  
-إضافة/تعديل دوال Compose و Room DAO ودوال منطق لعبة لضبط المؤقت، تحديث الإحصائيات، خلط الأسئلة، وإدارة الانتقالات بين شاشات التحدي.
+Add utility functions for difficulty mapping/background selection and sound playback lifecycle.
 
-## Room / DB
+1) `fun difficultyToUiTier(difficulty: String): QuizDifficultyUiTier`
+- Purpose: Convert `QuizQuestion.difficulty` to a stable enum.
+- Params:
+  - `difficulty: String`
+- Returns:
+  - `QuizDifficultyUiTier`
+- Behavior:
+  - Match against `DIFF_EASY`, `DIFF_MEDIUM`, `DIFF_HARD`, `DIFF_INSANE`, else `UNKNOWN`.
 
-### `UserDatabase.userStatsDao()`
-**Signature**
-```kotlin
-abstract fun userStatsDao(): UserStatsDao
-```
-**Behavior**
-- يوفّر DAO لإحصائيات اللاعب ضمن نفس قاعدة البيانات.
+2) `fun backgroundStyleFor(tier: QuizDifficultyUiTier): QuizBackgroundStyle`
+- Purpose: Map tier to gradient + accent palette.
+- Params:
+  - `tier: QuizDifficultyUiTier`
+- Returns:
+  - `QuizBackgroundStyle`
+- Suggested palettes (example):
+  - EASY: green/teal gradient, gentle accent
+  - MEDIUM: blue/purple gradient
+  - HARD: orange/red gradient
+  - INSANE: deep red/purple/black gradient with stronger accent
 
-### `UserStatsDao.getStats`
-```kotlin
-@Query("SELECT * FROM user_stats WHERE userId = :userId LIMIT 1")
-suspend fun getStats(userId: String = "main_user"): UserStatsEntity?
-```
-- يعيد null إن لم يتم إنشاء صف المستخدم بعد.
+3) `@Composable fun QuizDifficultyBackground(tier: QuizDifficultyUiTier, modifier: Modifier = Modifier, content: @Composable () -> Unit)`
+- Purpose: Apply background consistently in one place.
+- Behavior:
+  - Use `Brush.linearGradient` / `Brush.radialGradient`.
+  - Add subtle overlay for readability if needed.
+  - Render `content()` on top.
 
-### `UserStatsDao.upsert`
-```kotlin
-@Insert(onConflict = OnConflictStrategy.REPLACE)
-suspend fun upsert(stats: UserStatsEntity)
-```
+4) `class SoundPoolSoundManager(context: Context) : SoundManager`
+- Key functions:
+  - `override fun play(sfx: QuizSfx)`
+    - loads (or preloads) sound IDs for correct/wrong
+    - plays with reasonable volume (e.g., 1f left/right)
+    - handles “not loaded yet” edge: preload in init, ignore play until loaded or keep a fallback load listener
+  - `override fun release()`
+    - `soundPool.release()`
+- Error handling:
+  - If audio fails to load/play, swallow exception and continue gameplay (no crashes).
+  - Avoid repeated loads on recomposition: instantiate in `remember` and clean up in `DisposableEffect`.
 
-### `UserStatsDao.updatePowerLevel / updateSenzuBeans / updateHighestStreak / updateLastPlayedTimestamp`
-- Queries `UPDATE ... WHERE userId = :userId`.
+5) `@Composable fun rememberSoundManager(): SoundManager`
+- Purpose: Compose-friendly factory.
+- Behavior:
+  - uses `LocalContext.current`
+  - `remember { SoundPoolSoundManager(context) }`
+  - `DisposableEffect(Unit) { onDispose { release() } }`
 
-**Error handling**
-- سيُحاط استدعاء DAO داخل ViewModel بـ try/catch ويعود لقيم افتراضية عند الفشل، على نمط `MainViewModel`.
-
-## Quiz Core
-
-### `getRankName(powerLevel: Long): String`
-**Signature**
-```kotlin
-fun getRankName(powerLevel: Long): String
-```
-**Behavior**
-- Mapping مقترح:
-  - < 1_000 => "أرضي"
-  - < 10_000 => "مقاتل"
-  - < 100_000 => "مقاتل النخبة"
-  - < 1_000_000 => "سوبر سايان"
-  - < 10_000_000 => "سوبر سايان 2"
-  - < 100_000_000 => "سوبر سايان 3"
-  - else => "غريزة فائقة"
-- تُستخدم في شاشة Home لإعطاء لقب.
-
-### `shuffleQuestion(question: QuizQuestion, random: Random): QuizQuestion`
-**Signature**
-```kotlin
-fun shuffleQuestion(question: QuizQuestion): QuizQuestion
-```
-**Behavior**
-- يخلط `options` ويرجع سؤال جديد مع `correctAnswerIndex` الجديد.
-**Key detail**
-- نحتاج نقل الإجابة الصحيحة بالاعتماد على قيمة الخيار الصحيح الأصلية:
-  - `val correctText = question.options[question.correctAnswerIndex]`
-  - `val shuffled = question.options.shuffled(random)`
-  - `val newIndex = shuffled.indexOf(correctText)`
-
-### `buildSessionQuestions(allQuestions: List<QuizQuestion>, count: Int = 10): List<QuizQuestion>`
-- يختار `count` عشوائياً (أو أقل لو القائمة أقل) ثم يطبق `shuffleQuestion` على كل سؤال.
-
-### `powerRewardForDifficulty(difficulty: String): Long`
-**Behavior**
-- Easy: 500
-- Medium: 1000
-- Hard: 2000
-- Insane: 5000
-- يمكن تعديل الأرقام لاحقاً بسهولة.
-
-## Quiz UI Composables
-
-### `QuizMainScreen(...)`
-**Signature (مقترح مع ViewModel)**
-```kotlin
-@Composable
-fun QuizMainScreen(
-    modifier: Modifier = Modifier,
-    viewModel: QuizViewModel
-)
-```
-**Behavior**
-- يعرض UI حسب `QuizUiState`:
-  - Home: إظهار powerLevel + rank + senzuBeans + زر “ابدأ التحدي”.
-  - Playing: السؤال الحالي + مؤقت + أزرار الخيارات.
-  - GameOver/Victory: شاشات نهائية مع زر رجوع.
-- يستعمل `bounceClick` للزر الرئيسي ولبطاقات/أزرار عند الحاجة.
-
-### `QuizHomeContent(...)`
-- يظهر:
-  - “مستوى الطاقة” بارز جداً، لون `GokuOrange` وخط عريض.
-  - لقب الرتبة عبر `getRankName`.
-  - “حبات السنزو: X/3”.
-  - زر “ابدأ التحدي”.
-- عند الضغط:
-  - يتحقق من إعادة تعبئة السنزو اليومية:
-    - إن مرّ يوم (أو تغير التاريخ) منذ `lastPlayedTimestamp` => إعادة senzu إلى 3 وتحديث timestamp.
-  - إن `senzuBeans == 0` يمنع البدء ويعرض رسالة واضحة (قرار معتمد).
-  - يبدأ Session جديدة بأسئلة عشوائية.
-
-### `QuizPlayingContent(...)`
-- Timer:
-  - مدة 15 ثانية لكل سؤال.
-  - `LinearProgressIndicator` في الأعلى ينقص تدريجياً.
-  - `LaunchedEffect(currentQuestionId)` يطلق مؤقت:
-    - تحديث progress كل 100ms أو 250ms.
-    - عند الوصول للصفر => اعتباره خطأ وتنفيذ نفس مسار “إجابة خاطئة”.
-- Question card:
-  - Card بخلفية `Color(0xFF1E1E1E)` ونص عربي واضح.
-- Answer buttons:
-  - 4 أزرار، كل واحد يمثل خيار.
-- Haptics:
-  - عند الصح: `HapticFeedbackType.TextHandleMove` (أو `HapticFeedbackType.LongPress` كاهتزاز واضح) — لكن بما أنك طلبت “عادي للصح” سنستخدم `HapticFeedbackType.TextHandleMove` أو `KeyboardTap` إن توفر.
-  - عند الخطأ: `HapticFeedbackType.LongPress`.
-- Game logic:
-  - صح:
-    - زيادة `earnedPower` حسب الصعوبة.
-    - تحديث `powerLevel` في DB فوراً (IO).
-    - زيادة `currentStreak`، وتحديث `highestStreak` في DB إن تجاوز.
-    - الانتقال للسؤال التالي.
-  - خطأ/انتهاء الوقت:
-    - خصم `senzuBeans` بحد أدنى 0 مع تحديث DB.
-    - تصفير `currentStreak`.
-    - إن وصلت 0 => `GameOver`.
-    - وإلا الانتقال للسؤال التالي مباشرة (قرار معتمد).
-  - نهاية الأسئلة:
-    - `Victory` مع `earnedPower`.
-
-### `GameOverScreen(...)` و `VictoryScreen(...)`
-- تعرض نص عربي:
-  - Game Over: “انتهت حبات السنزو!” + “الطاقة المكتسبة: …”
-  - Victory: “أحسنت! أنهيت التحدي” + “الطاقة المكتسبة: …”
-- زر “العودة” لإرجاع الحالة إلى Home.
-
-## Navigation integration
-
-### Update `MainDestination`
-**Current**
-```kotlin
-private enum class MainDestination { Anime, Manga }
-```
-**New**
-```kotlin
-private enum class MainDestination { Anime, Manga, Quiz }
-```
-
-### Update `DragonBallBottomBar`
-- إضافة `NavigationBarItem` ثالث:
-  - `icon = Icons.Filled.Star`
-  - `label = "تحديات"`
-  - ألوان مختارة مثل الموجود.
-
-### Update `DragonBallHomeContent`
-- فرع جديد:
-```kotlin
-MainDestination.Quiz -> { QuizMainScreen(viewModel = quizViewModel, modifier = modifier) }
-```
-- إذا تم إنشاء `QuizViewModel`:
-  - في `DragonBallScaffold` أو `MainActivity` سننشئه بـ `viewModels()` أو `viewModel()` داخل Compose (مع Factory لأن يحتاج `Application` لقاعدة البيانات).
+6) Timer UI helpers in `QuizScreen.kt`:
+- `val isUrgent = remainingMs <= 5000`
+- `val targetColor = if (isUrgent) Color.Red else GokuOrange`
+- `val animatedColor by animateColorAsState(targetColor, ...)`
+- Blink:
+  - `val alpha by infiniteTransition.animateFloat(...)`
+  - Apply alpha only when urgent.
 
 [Changes]  
-التنفيذ سيتم بإضافة طبقة Quiz مستقلة قدر الإمكان (ملفات جديدة) ثم دمجها في التنقل الحالي، مع تحديث Room DB وتغذية الـ UI من ViewModel لضمان سلامة الاستدعاءات المعلّقة (suspend) وعدم تنفيذ IO داخل Composable مباشرة.
+Implement Phase 1 by refactoring `QuizPlayingContent` to wrap question content in `AnimatedContent`, augmenting the timer composable with urgency animation, adding a SoundPool manager, and applying a difficulty-based background wrapper.
 
-1. **تحديث Room Database**
-   1. إنشاء `UserStatsEntity` و `UserStatsDao`.
-   2. تعديل `UserDatabase.kt`:
-      - `entities = [UserEpisodeEntity::class, UserStatsEntity::class]`
-      - `version = 2`
-      - إضافة `abstract fun userStatsDao(): UserStatsDao`
-      - إبقاء `fallbackToDestructiveMigration()` كما هو (هذا سيعيد إنشاء DB عند ترقية النسخة).
-   3. إضافة “تهيئة افتراضية” للسجل:
-      - داخل `QuizViewModel.init` (أو عند فتح شاشة Quiz لأول مرة) ننفذ:
-        - `if (dao.getStats() == null) dao.upsert(UserStatsEntity())`
+Step-by-step plan:
 
-2. **بناء بنك أسئلة + خلط**
-   1. إنشاء `QuizQuestion` + `dummyQuestions` (10 أسئلة عربية).
-   2. إضافة helpers:
-      - `buildSessionQuestions` لاختيار/خلط.
-      - `shuffleQuestion` لخلط الخيارات مع إعادة ضبط الإجابة.
+1) Add audio resources
+- Create `app/src/main/res/raw/quiz_correct.*` and `quiz_wrong.*`.
+- Keep files small (short SFX).
+- Verify they’re packaged by building the app.
 
-3. **إضافة ViewModel للـ Quiz (مفضل)**
-   1. `QuizViewModel(application: Application)` مشابه لـ `MainViewModel`:
-      - الحصول على `UserStatsDao` من `UserDatabase.getInstance(...).userStatsDao()`.
-      - `StateFlow<UserStatsEntity>` للإحصائيات (أو `MutableStateFlow`).
-      - `StateFlow<QuizUiState>` لحالة الشاشة.
-      - `MutableStateFlow<QuizSessionState?>` للجلسة.
-   2. دوال:
-      - `fun loadOrCreateStats()`
-      - `fun startGame()`
-      - `fun answer(selectedIndex: Int)`
-      - `fun onTimeExpired()`
-      - `fun backToHome()`
-      - `fun maybeRefillDailySenzu()`:
-        - مقارنة `lastPlayedTimestamp` مع تاريخ اليوم (LocalDate باستخدام `java.time` مع minSdk 24 متاح).
-        - إذا تغير اليوم (تاريخ مختلف) => ضبط senzu=3 وتحديث timestamp.
-   3. جميع تحديثات DB ضمن `viewModelScope.launch(Dispatchers.IO)`.
+2) Create the sound manager abstraction
+- Add `quiz/audio/SoundManager.kt`:
+  - `QuizSfx`, `SoundManager`, `SoundPoolSoundManager`.
+- Implementation details:
+  - Use `SoundPool.Builder().setMaxStreams(2).build()`.
+  - `load(context, resId, 1)` for correct/wrong.
+  - Optionally track loaded state using `setOnLoadCompleteListener`.
+  - `play(soundId, 1f, 1f, 1, 0, 1f)`.
 
-4. **تصميم واجهات Compose**
-   1. إنشاء `QuizMainScreen` تقرأ flows عبر `collectAsStateWithLifecycle`.
-   2. بناء Home UI حسب المتطلبات.
-   3. بناء Playing UI:
-      - `LinearProgressIndicator` مع progress state.
-      - `LaunchedEffect(questionId)` لتشغيل مؤقت 15 ثانية.
-      - عند الضغط على خيار:
-        - تعطيل الأزرار فوراً لمنع الضغط المتعدد.
-        - إرسال haptic حسب الصح/الخطأ.
-        - تحديث الحالة والانتقال.
-   4. بناء GameOver/Victory.
+3) Create difficulty → UI tier + background mapping
+- Add `quiz/ui/QuizBackgrounds.kt`:
+  - `QuizDifficultyUiTier`
+  - `difficultyToUiTier`
+  - `backgroundStyleFor`
+  - `QuizDifficultyBackground` composable
+- Ensure background is only applied in playing mode so Home/Results remain stable.
 
-5. **دمج التنقل السفلي**
-   1. تحديث enum `MainDestination`.
-   2. تحديث `DragonBallBottomBar`.
-   3. تحديث `DragonBallHomeContent` لإضافة الفرع الثالث.
-   4. ضمان عدم التداخل مع منطق الفيديو/المانغا:
-      - Quiz لا يلمس متغيرات `selectedVideoUrl`/`selectedMangaChapterNumber`.
+4) Update `QuizPlayingContent` to apply dynamic background
+- In `QuizMainScreen`, inside `QuizUiState.Playing`, or inside `QuizPlayingContent`:
+  - compute `val tier = difficultyToUiTier(q.difficulty)`
+  - wrap existing `Column` with `QuizDifficultyBackground(tier) { ... }`
+- Make sure padding/readability remain good.
 
-6. **تحقق بصري ووظيفي**
-   1. Build/Run.
-   2. التحقق من:
-      - الانتقال للـ Quiz من BottomBar.
-      - إنشاء stats افتراضي.
-      - مؤقت يعمل ويعتبر انتهاء الوقت “خطأ”.
-      - تحديث الطاقة وحبات السنزو في DB (يظهر في Home بعد العودة).
-      - GameOver عند وصول السنزو 0.
-      - Victory عند نهاية الأسئلة.
-      - خلط الأسئلة والخيارات بين كل جلسة.
+5) Implement AnimatedContent for question transitions
+- Wrap the question + answers region in:
+  - `AnimatedContent(targetState = q.id, transitionSpec = { ... }) { ... }`
+- Use `q.id` (or `session.currentIndex`) as the target state key so animation triggers on next question.
+- Inside the animated block, render:
+  - question `Card`
+  - answer buttons
+- Keep timer outside animated block if you want timer to reset cleanly per question; or key timer state by `q.id` as currently done (it is keyed by `remember(q.id)`), which is correct.
+
+6) Upgrade timer to urgency-aware color + blink
+- Derive `remainingMs` already exists.
+- Add:
+  - `isUrgent` when `remainingMs <= 5000`.
+  - `animatedColor` via `animateColorAsState`.
+  - blink alpha via `rememberInfiniteTransition` only when urgent (or always but apply conditionally).
+- Apply `color = animatedColor.copy(alpha = alphaIfUrgent)` to `LinearProgressIndicator`.
+
+7) Add sound playback triggers
+- Instantiate `SoundManager` once per playing session:
+  - `val soundManager = rememberSoundManager()`
+- On answer click:
+  - compute `isCorrect`
+  - call `soundManager.play(if (isCorrect) QuizSfx.Correct else QuizSfx.Wrong)`
+  - then call `onAnswer(index)` as today.
+- On time expiry:
+  - right before `onTimeExpired()`, call `soundManager.play(QuizSfx.Wrong)`
+  - ensure it fires only once by guarding with `localAnswered`.
+
+8) Verify lifecycle + recomposition safety
+- Ensure `SoundPool` is released when leaving playing screen:
+  - via `DisposableEffect` inside `rememberSoundManager`.
+- Ensure timer resets correctly on question change (already keyed by `q.id`).
+- Ensure no double sounds: keep `localAnswered` as the single gate.
+
+9) Build & run smoke checks
+- Manual checks:
+  - Animated transition occurs between questions.
+  - Timer turns red and blinks in last 5 seconds.
+  - Correct and wrong sounds play once.
+  - Background changes with difficulty label.
+  - No crashes when leaving quiz or rotating (if supported).
 
 [Tests]  
-الاختبارات ستكون مزيج Unit + (اختياري) Instrumentation، مع تركيز على منطق الخلط والجوائز وتحديث الإحصائيات لأن Compose UI صعب اختباره بالكامل دون إعدادات إضافية.
+Use a mix of unit tests for mapping utilities and Compose UI tests for basic rendering and state transitions, plus manual verification for audio/animation behavior.
 
-- **Unit Tests (JVM)**
-  - `shuffleQuestion`:
-    - الحفاظ على نفس 4 خيارات لكن بتبديل ترتيب.
-    - التأكد أن `correctAnswerIndex` يشير لنفس النص الصحيح بعد الخلط.
-  - `powerRewardForDifficulty`:
-    - التحقق من قيم الجوائز لكل صعوبة.
-  - `getRankName`:
-    - حدود (boundary values) عند 999/1000، 9999/10000، … إلخ.
-  - `buildSessionQuestions`:
-    - يعيد عدد صحيح من الأسئلة ويختلف ترتيبها بين تشغيلين (باستخدام seed للتحكم).
-
-- **Integration / Instrumentation (اختياري)**
-  - اختبار Room:
-    - إنشاء DB in-memory وكتابة/قراءة `UserStatsEntity`.
-    - التحقق من update queries.
-  - (اختياري) Compose UI Test:
-    - فتح Quiz screen والتحقق من ظهور “ابدأ التحدي”.
-
-- **Edge Cases**
-  - `senzuBeans` = 0: يمنع بدء التحدي أو يبدأ ويؤدي فوراً لـ GameOver (سنختار المنع + رسالة).
-  - بنك أسئلة أقل من المطلوب: اختيار المتاح فقط.
-  - إعادة تعبئة السنزو اليومية: تغير اليوم/المنطقة الزمنية.
-  - تدوير الشاشة: بوجود ViewModel تبقى الحالة؛ مع remember فقط قد تفقد.
+- Unit tests:
+  - `difficultyToUiTier` mapping for each `DIFF_*` and unknown.
+  - `backgroundStyleFor` returns non-empty colors and valid alpha.
+- Compose UI tests (if test infra exists):
+  - Render `QuizPlayingContent` with a fake session and verify:
+    - difficulty label shown
+    - progress indicator exists
+    - answer buttons count matches options
+  - (Animations are hard to assert; focus on stable nodes/semantics.)
+- Manual verification (required due to audio/animation):
+  - Confirm SFX plays for correct/wrong and not multiple times.
+  - Confirm timer urgency effect triggers at 5s.
+  - Confirm transition is smooth and keyed by question changes.

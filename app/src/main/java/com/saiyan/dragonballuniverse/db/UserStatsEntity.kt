@@ -7,7 +7,7 @@ import androidx.room.PrimaryKey
 data class UserStatsEntity(
     @PrimaryKey val userId: String = "main_user",
     val powerLevel: Long = 5L,
-    val senzuBeans: Int = 3,
+    val senzuBeans: Int = 99,
     val highestStreak: Int = 0,
     val lastPlayedTimestamp: Long = 0L
 )
