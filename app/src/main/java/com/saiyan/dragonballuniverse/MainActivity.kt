@@ -2,29 +2,24 @@ package com.saiyan.dragonballuniverse
 
 import android.content.pm.ActivityInfo
 import android.os.Bundle
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.composed
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,54 +27,55 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountBox
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.AccountBox
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.Saver
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.Saver as ComposeSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -87,30 +83,36 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.ColorPainter
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInteropFilter
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import coil.request.ImageRequest
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import com.saiyan.dragonballuniverse.db.UserDatabase
+import com.saiyan.dragonballuniverse.db.UserEpisodeEntity
 import com.saiyan.dragonballuniverse.network.ApiEpisode
 import com.saiyan.dragonballuniverse.network.JikanRetrofitClient
 import com.saiyan.dragonballuniverse.ui.theme.DarkBackground
 import com.saiyan.dragonballuniverse.ui.theme.DragonBallUniverseTheme
 import com.saiyan.dragonballuniverse.ui.theme.GokuOrange
 import com.saiyan.dragonballuniverse.ui.theme.VegetaBlue
-import android.util.Log
-import androidx.compose.ui.text.font.FontWeight
-import coil.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -124,14 +126,10 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class MainDestination(
-    val label: String
-) {
-    Anime(label = "أنمي"),
-    Manga(label = "مانغا")
+private enum class MainDestination {
+    Anime,
+    Manga
 }
-
-private const val TAG_IMAGE: String = "DBU_Image"
 
 private const val DEFAULT_DBZ_COVER_URL: String =
     "https://j.top4top.io/p_3722xahg41.jpg"
@@ -141,7 +139,8 @@ private data class Episode(
     val title: String,
     val duration: String,
     val imageUrl: String = DEFAULT_DBZ_COVER_URL,
-    val progress: Float = 0f
+    val progress: Float = 0f,
+    val id: String = number.toString(),
 )
 
 private data class AnimeSeason(
@@ -166,8 +165,8 @@ private data class Manga(
     val chapters: List<MangaChapter>
 )
 
-private val EpisodeSaver: Saver<Episode, List<Any?>> =
-    Saver(
+private val EpisodeSaver: ComposeSaver<Episode, List<Any?>> =
+    ComposeSaver(
         save = { episode ->
             listOf(
                 episode.number,
@@ -178,9 +177,9 @@ private val EpisodeSaver: Saver<Episode, List<Any?>> =
             )
         },
         restore = { saved ->
-            val number = saved.getOrElse(0) { null } as? Int ?: return@Saver null
-            val title = saved.getOrElse(1) { null } as? String ?: return@Saver null
-            val duration = saved.getOrElse(2) { null } as? String ?: return@Saver null
+            val number = saved.getOrElse(0) { null } as? Int ?: return@ComposeSaver null
+            val title = saved.getOrElse(1) { null } as? String ?: return@ComposeSaver null
+            val duration = saved.getOrElse(2) { null } as? String ?: return@ComposeSaver null
             val imageUrl = saved.getOrElse(3) { "" } as? String ?: ""
             val progress = saved.getOrElse(4) { 0f } as? Float ?: 0f
             Episode(
@@ -193,12 +192,12 @@ private val EpisodeSaver: Saver<Episode, List<Any?>> =
         }
     )
 
-private val AnimeSeasonSaver: Saver<AnimeSeason, List<Any?>> =
-    Saver(
+private val AnimeSeasonSaver: ComposeSaver<AnimeSeason, List<Any?>> =
+    ComposeSaver(
         save = { season ->
             val episodesSaved = ArrayList<List<Any?>>(season.episodes.size)
             season.episodes.forEach { ep ->
-                episodesSaved.add(with(EpisodeSaver) { save(ep) } ?: return@Saver null)
+                episodesSaved.add(with(EpisodeSaver) { save(ep) } ?: return@ComposeSaver null)
             }
             listOf(
                 season.title,
@@ -210,17 +209,16 @@ private val AnimeSeasonSaver: Saver<AnimeSeason, List<Any?>> =
             )
         },
         restore = { saved ->
-            val title = saved.getOrElse(0) { null } as? String ?: return@Saver null
-            val year = saved.getOrElse(1) { null } as? String ?: return@Saver null
-            val description = saved.getOrElse(2) { null } as? String ?: return@Saver null
-            val episodesPayload = saved.getOrElse(3) { null } as? List<*> ?: return@Saver null
+            val title = saved.getOrElse(0) { null } as? String ?: return@ComposeSaver null
+            val year = saved.getOrElse(1) { null } as? String ?: return@ComposeSaver null
+            val description = saved.getOrElse(2) { null } as? String ?: return@ComposeSaver null
+            val episodesPayload = saved.getOrElse(3) { null } as? List<*> ?: return@ComposeSaver null
             val imageUrl = saved.getOrElse(4) { "" } as? String ?: ""
             val status = saved.getOrElse(5) { null } as? String
 
             val episodes = episodesPayload.mapNotNull { payload ->
-                val listPayload = payload as? List<*> ?: return@mapNotNull null
-                @Suppress("UNCHECKED_CAST")
-                with(EpisodeSaver) { restore(listPayload as List<Any?> ?: return@mapNotNull null) }
+                val listPayload = payload as? List<Any?> ?: return@mapNotNull null
+                with(EpisodeSaver) { restore(listPayload) }
             }
 
             AnimeSeason(
@@ -234,8 +232,8 @@ private val AnimeSeasonSaver: Saver<AnimeSeason, List<Any?>> =
         }
     )
 
-private val NullableAnimeSeasonSaver: Saver<AnimeSeason?, Any> =
-    Saver(
+private val NullableAnimeSeasonSaver: ComposeSaver<AnimeSeason?, Any> =
+    ComposeSaver(
         save = { season ->
             season?.let { with(AnimeSeasonSaver) { save(it) } } ?: 0
         },
@@ -244,8 +242,7 @@ private val NullableAnimeSeasonSaver: Saver<AnimeSeason?, Any> =
                 0 -> null
                 is List<*> -> {
                     @Suppress("UNCHECKED_CAST")
-                    val payload = saved as List<Any?>
-                    with(AnimeSeasonSaver) { restore(payload) }
+                    with(AnimeSeasonSaver) { restore(saved as List<Any?>) }
                 }
                 else -> null
             }
@@ -262,16 +259,6 @@ private fun statusBadgeColor(
         else -> Color(0xFF616161)
     }
 
-private fun ratingBadgeColor(
-    rating: String
-): Color {
-    val value = rating.toFloatOrNull() ?: 0f
-    return when {
-        value >= 8f -> Color(0xFF2E7D32)
-        value >= 6.5f -> Color(0xFFEF6C00)
-        else -> Color(0xFFB71C1C)
-    }
-}
 
 internal fun resolveImageUrl(
     primary: String?,
@@ -467,7 +454,9 @@ private fun MangaReaderScreen(
 
 @Composable
 private fun VideoPlayerScreen(
+    episodeId: String,
     videoUrl: String,
+    onPlayNext: (String, String) -> Unit,
     onBack: () -> Unit
 ) {
     if (videoUrl.isBlank()) {
@@ -495,6 +484,14 @@ private fun VideoPlayerScreen(
         }
     }
 
+    val db = remember(context) { UserDatabase.getInstance(context) }
+    val dao = remember(db) { db.episodeDao() }
+
+    // Smart Resume: load progress from DB once per episode
+    val savedProgressMs by produceState<Long?>(initialValue = null, key1 = episodeId) {
+        value = dao.getWatchProgress(episodeId)
+    }
+
     val player = remember(videoUrl) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(videoUrl))
@@ -503,9 +500,48 @@ private fun VideoPlayerScreen(
         }
     }
 
-    DisposableEffect(player) {
+    // Seek once we have saved progress
+    LaunchedEffect(savedProgressMs, player) {
+        val ms = savedProgressMs
+        if (ms != null && ms > 0L) {
+            player.seekTo(ms)
+        }
+    }
+
+    // Auto play next when ended
+    DisposableEffect(player, onPlayNext, videoUrl, episodeId) {
+        val listener =
+            object : Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_ENDED) {
+                        onPlayNext(episodeId, videoUrl)
+                    }
+                }
+            }
+
+        player.addListener(listener)
         onDispose {
+            player.removeListener(listener)
             player.release()
+        }
+    }
+
+    // Save watch progress silently each 5 seconds
+    DisposableEffect(player, episodeId) {
+        val job =
+            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                while (true) {
+                    delay(5000)
+                    saveWatchProgress(dao = dao, episodeId = episodeId, progressMs = player.currentPosition)
+                }
+            }
+
+        onDispose {
+            job.cancel()
+            // last save on dispose (silent)
+            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                saveWatchProgress(dao = dao, episodeId = episodeId, progressMs = player.currentPosition)
+            }
         }
     }
 
@@ -539,6 +575,25 @@ private fun VideoPlayerScreen(
     }
 }
 
+private suspend fun saveWatchProgress(
+    dao: com.saiyan.dragonballuniverse.db.EpisodeDao,
+    episodeId: String,
+    progressMs: Long
+) {
+    val existing = dao.getEpisode(episodeId)
+    val entity =
+        if (existing == null) {
+            UserEpisodeEntity(
+                episodeId = episodeId,
+                isFavorite = false,
+                watchProgress = progressMs
+            )
+        } else {
+            existing.copy(watchProgress = progressMs)
+        }
+    dao.upsert(entity)
+}
+
 private val dragonBallManga = Manga(
     title = "دراغون بول",
     description = "وصف عربي مناسب يعرّف بعالم دراغون بول وبداية مغامرات غوكو ورحلة كرات التنين.",
@@ -551,58 +606,27 @@ private val dragonBallManga = Manga(
     )
 )
 
-private val animeSeasons = listOf(
-    AnimeSeason(
-        title = "دراغون بول",
-        year = "1986",
-        description = "بداية أسطورة غوكو ولقائه بـ بولما والبحث عن كرات التنين.",
-        episodes = listOf(
-            Episode(number = 1, title = "لقاء غوكو وبولما", duration = "24 دقيقة"),
-            Episode(number = 2, title = "رحلة البحث عن كرة التنين", duration = "24 دقيقة"),
-            Episode(number = 3, title = "أول اختبار حقيقي", duration = "24 دقيقة")
-        )
-    ),
-    AnimeSeason(
-        title = "دراغون بول Z",
-        year = "1989",
-        description = "وصول السايانز إلى الأرض ومعارك ملحمية لإنقاذ الكون.",
-        episodes = listOf(
-            Episode(number = 1, title = "وصول راديتز", duration = "24 دقيقة"),
-            Episode(number = 2, title = "تدريب غوهان", duration = "24 دقيقة"),
-            Episode(number = 3, title = "معركة على الأرض", duration = "24 دقيقة"),
-            Episode(number = 4, title = "قوة السايانز", duration = "24 دقيقة")
-        )
-    ),
-    AnimeSeason(
-        title = "دراغون بول GT",
-        year = "1996",
-        description = "غوكو يعود صغيراً وينطلق في رحلة عبر الفضاء.",
-        episodes = listOf(
-            Episode(number = 1, title = "عودة غوكو صغيراً", duration = "24 دقيقة"),
-            Episode(number = 2, title = "انطلاق الرحلة", duration = "24 دقيقة"),
-            Episode(number = 3, title = "مفاجآت الفضاء", duration = "24 دقيقة")
-        )
-    ),
-    AnimeSeason(
-        title = "دراغون بول Super",
-        year = "2015",
-        description = "ظهور حكام الدمار وبطولة الأكوان المتعددة.",
-        episodes = listOf(
-            Episode(number = 1, title = "بداية عصر جديد", duration = "24 دقيقة"),
-            Episode(number = 2, title = "مواجهة إله الدمار", duration = "24 دقيقة"),
-            Episode(number = 3, title = "بطولة الأكوان", duration = "24 دقيقة"),
-            Episode(number = 4, title = "تحدي جديد", duration = "24 دقيقة")
-        )
-    )
-)
 
 @Composable
 private fun DragonBallScaffold() {
     var selectedDestination by rememberSaveable { mutableStateOf(MainDestination.Anime) }
 
+    var isSearchMode by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        topBar = { DragonBallTopBar() },
+        topBar = {
+            DragonBallTopBar(
+                isSearchMode = isSearchMode,
+                searchQuery = searchQuery,
+                onSearchQueryChange = { searchQuery = it },
+                onToggleSearch = {
+                    isSearchMode = !isSearchMode
+                    if (!isSearchMode) searchQuery = ""
+                }
+            )
+        },
         bottomBar = {
             DragonBallBottomBar(
                 selected = selectedDestination,
@@ -612,6 +636,7 @@ private fun DragonBallScaffold() {
     ) { innerPadding ->
         DragonBallHomeContent(
             selectedDestination = selectedDestination,
+            searchQuery = searchQuery,
             modifier = Modifier.padding(innerPadding)
         )
     }
@@ -620,10 +645,34 @@ private fun DragonBallScaffold() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DragonBallTopBar(
-    title: String = "دراغون بول بالعربي"
+    title: String = "دراغون بول بالعربي",
+    isSearchMode: Boolean,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    onToggleSearch: () -> Unit,
 ) {
     TopAppBar(
-        title = { Text(text = title) },
+        title = {
+            if (isSearchMode) {
+                TextField(
+                    value = searchQuery,
+                    onValueChange = onSearchQueryChange,
+                    singleLine = true,
+                    placeholder = { Text("ابحث عن حلقة...") }
+                )
+            } else {
+                Text(text = title)
+            }
+        },
+        actions = {
+            IconButton(onClick = onToggleSearch) {
+                Icon(
+                    imageVector = Icons.Filled.Search,
+                    contentDescription = "بحث",
+                    tint = Color.White
+                )
+            }
+        },
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = VegetaBlue,
             titleContentColor = Color.White
@@ -671,10 +720,12 @@ private fun DragonBallBottomBar(
 @Composable
 private fun DragonBallHomeContent(
     selectedDestination: MainDestination,
+    searchQuery: String,
     modifier: Modifier = Modifier
 ) {
     var selectedSeason by rememberSaveable(stateSaver = NullableAnimeSeasonSaver) { mutableStateOf<AnimeSeason?>(null) }
     var selectedVideoUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedEpisodeId by rememberSaveable { mutableStateOf<String?>(null) }
 
     var selectedManga by rememberSaveable { mutableStateOf<Manga?>(null) }
     var selectedMangaChapterNumber by rememberSaveable { mutableStateOf<String?>(null) }
@@ -700,10 +751,25 @@ private fun DragonBallHomeContent(
         }
     }
 
-    if (selectedVideoUrl != null) {
+    if (selectedVideoUrl != null && selectedEpisodeId != null) {
+        val currentEpisodesSnapshot = episodesList
+        val sampleUrlSnapshot =
+            "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+
         VideoPlayerScreen(
+            episodeId = selectedEpisodeId!!,
             videoUrl = selectedVideoUrl!!,
-            onBack = { selectedVideoUrl = null }
+            onPlayNext = { currentId, _ ->
+                val uiEpisodes = mapApiEpisodesToUiEpisodes(currentEpisodesSnapshot)
+                val currentIndex = uiEpisodes.indexOfFirst { it.id == currentId }
+                val next = uiEpisodes.getOrNull(currentIndex + 1) ?: return@VideoPlayerScreen
+                selectedEpisodeId = next.id
+                selectedVideoUrl = sampleUrlSnapshot
+            },
+            onBack = {
+                selectedVideoUrl = null
+                selectedEpisodeId = null
+            }
         )
         return
     }
@@ -728,7 +794,20 @@ private fun DragonBallHomeContent(
             status = "مكتمل"
         )
 
-    val seasonsToShow = listOf(dbzSeason)
+    val filteredEpisodesList =
+        if (searchQuery.isBlank()) {
+            episodesList
+        } else {
+            val q = searchQuery.trim()
+            episodesList.filter { it.title.contains(q, ignoreCase = true) }
+        }
+
+    val seasonsToShow =
+        listOf(
+            dbzSeason.copy(
+                episodes = mapApiEpisodesToUiEpisodes(filteredEpisodesList)
+            )
+        )
 
     when (selectedDestination) {
         MainDestination.Anime -> {
@@ -768,7 +847,10 @@ private fun DragonBallHomeContent(
                     SeasonDetailsScreen(
                         season = selectedSeason!!,
                         onBack = { selectedSeason = null },
-                        onEpisodeClick = { selectedVideoUrl = sampleUrl },
+                        onEpisodeClick = { ep ->
+                            selectedEpisodeId = ep.id
+                            selectedVideoUrl = sampleUrl
+                        },
                         modifier = modifier
                     )
                 }
@@ -1345,6 +1427,17 @@ private fun EpisodeRowCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val db = remember(context) { UserDatabase.getInstance(context) }
+    val dao = remember(db) { db.episodeDao() }
+    val episodeId = remember(episode.id) { episode.id }
+
+    val isFavorite by produceState<Boolean>(initialValue = false, key1 = episodeId) {
+        value = dao.isFavorite(episodeId) ?: false
+    }
+
+    val favoriteTint = if (isFavorite) Color(0xFFE53935) else Color(0xFF9E9E9E)
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -1383,6 +1476,32 @@ private fun EpisodeRowCard(
                         color = Color(0xFF9E9E9E),
                         modifier = Modifier.padding(top = 6.dp)
                     )
+
+                    IconToggleButton(
+                        checked = isFavorite,
+                        onCheckedChange = { checked ->
+                            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                                val existing = dao.getEpisode(episodeId)
+                                val updated =
+                                    if (existing == null) {
+                                        UserEpisodeEntity(
+                                            episodeId = episodeId,
+                                            isFavorite = checked,
+                                            watchProgress = 0L
+                                        )
+                                    } else {
+                                        existing.copy(isFavorite = checked)
+                                    }
+                                dao.upsert(updated)
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            contentDescription = "مفضلة",
+                            tint = favoriteTint
+                        )
+                    }
                 }
 
                 // Thumbnail (يمين) + Play overlay
