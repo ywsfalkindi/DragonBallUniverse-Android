@@ -5,6 +5,8 @@ import com.saiyan.dragonballuniverse.db.MangaProgressDao
 import com.saiyan.dragonballuniverse.db.UserMangaProgressEntity
 import com.saiyan.dragonballuniverse.network.MangaApiService
 import com.saiyan.dragonballuniverse.network.MangaRetrofitClient
+import com.saiyan.dragonballuniverse.network.PocketBaseClient
+import com.saiyan.dragonballuniverse.network.PocketBaseMangaChapterRecord
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import kotlinx.coroutines.flow.Flow
@@ -12,11 +14,46 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 
 class MangaRepositoryImpl(
-    // Kept for compatibility with existing DI/wiring, but no longer used for chapter/page listing (Option B).
+    // Kept for compatibility with existing DI/wiring, but no longer used for chapter/page listing.
     private val api: MangaApiService,
     private val progressDao: MangaProgressDao,
     private val downloadDao: MangaDownloadDao,
 ) : MangaRepository {
+
+    // Basic in-memory cache for PocketBase metadata so the app can still show previously fetched
+    // chapters if PocketBase is temporarily unreachable.
+    private val chaptersCacheByArc: MutableMap<MangaArc, List<PocketBaseMangaChapterRecord>> = mutableMapOf()
+
+    private suspend fun fetchChapterMetasFromPocketBase(arc: MangaArc): List<PocketBaseMangaChapterRecord> {
+        // PocketBase filter syntax:
+        // https://pocketbase.io/docs/api-records/#listrecords
+        // Strings must be double-quoted.
+        val filter = """is_published=true && arc="${arc.toApiArc()}""""
+
+        val resp =
+            PocketBaseClient.apiService.listMangaChapters(
+                filter = filter,
+                sort = "+chapter_number",
+                page = 1,
+                perPage = 200,
+            )
+
+        // Extra safety: server-side filter should already handle is_published.
+        return resp.items
+            .filter { it.isPublished }
+            .filter { it.arc.equals(arc.name.lowercase(), ignoreCase = true) }
+            .filter { it.chapterNumber > 0 }
+    }
+
+    private suspend fun getCachedOrFetchChapterMetas(arc: MangaArc): List<PocketBaseMangaChapterRecord> =
+        try {
+            val items = fetchChapterMetasFromPocketBase(arc)
+            chaptersCacheByArc[arc] = items
+            items
+        } catch (_: Exception) {
+            // Fallback to cache if available
+            chaptersCacheByArc[arc].orEmpty()
+        }
 
     private val probeClient: OkHttpClient =
         OkHttpClient.Builder()
@@ -26,8 +63,7 @@ class MangaRepositoryImpl(
 
     override fun getChapters(arc: MangaArc): Flow<List<MangaRepository.MangaChapterInfoWithUserState>> =
         flow {
-            // Local catalog (Option B): no JSON endpoint.
-            val metas = MangaLocalCatalog.chaptersForArc(arc)
+            val metas = getCachedOrFetchChapterMetas(arc)
 
             val chapterInfos =
                 metas.map { meta ->
@@ -35,11 +71,12 @@ class MangaRepositoryImpl(
                         arc = arc,
                         chapterNumber = meta.chapterNumber,
                         title = meta.title,
-                        releaseYear = meta.releaseYear,
-                        // Unknown until opened; keep a placeholder.
+                        // PocketBase doesn't currently provide releaseYear; keep 0 for compatibility.
+                        releaseYear = "0",
+                        // Keep placeholder; page list is resolved when opening the chapter.
                         pageCount = 0,
                     )
-                }.filter { it.chapterNumber > 0 }
+                }
 
             emit(chapterInfos)
         }.map { chapters ->
@@ -77,8 +114,8 @@ class MangaRepositoryImpl(
         val baseUrl = MangaRetrofitClient.baseUrl().trimEnd('/')
 
         val metaTotalPages =
-            MangaLocalCatalog
-                .chaptersForArc(arc)
+            // Use PocketBase metadata (cached if PocketBase is down).
+            getCachedOrFetchChapterMetas(arc)
                 .firstOrNull { it.chapterNumber == chapterNumber }
                 ?.totalPages
                 ?: 0

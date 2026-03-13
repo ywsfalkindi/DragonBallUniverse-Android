@@ -1,7 +1,11 @@
 package com.saiyan.dragonballuniverse.manga.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.consumePositionChange
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlin.math.abs
 import androidx.compose.foundation.layout.Box
@@ -216,24 +220,61 @@ private fun ZoomablePageImage(
             .fillMaxSize()
             .onSizeChanged { containerSize = it }
             .pointerInput(Unit) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    val centroidMovedHorizontally =
-                        abs(pan.x) > abs(pan.y) && abs(pan.x) > 0.5f
+                awaitEachGesture {
+                    // Track per-gesture deltas and decide if we should "own" the gesture.
+                    var gestureOwns = false
 
-                    // 1) Horizontal drag at base scale: pass-through to HorizontalPager (no consume, no state change)
-                    if (scale == 1f && zoom == 1f && centroidMovedHorizontally) return@detectTransformGestures
+                    while (true) {
+                        // Read changes without consuming by default.
+                        val event = awaitPointerEvent(pass = PointerEventPass.Main)
+                        val changes = event.changes
 
-                    // 2) Pinch: update scale immediately
-                    val newScale = (scale * zoom).coerceIn(1f, 3f)
-                    scale = newScale
+                        if (changes.isEmpty()) break
 
-                    // 3) Pan only when zoomed; at scale==1f keep offset at zero
-                    offset =
-                        if (newScale <= 1f) {
-                            Offset.Zero
-                        } else {
-                            clampPanOffset(offset + pan, newScale, containerSize)
+                        val pressedCount = changes.count { it.pressed }
+
+                        // If all pointers are up, gesture ended.
+                        if (pressedCount == 0) break
+
+                        val zoom = event.calculateZoom()
+                        val pan = event.calculatePan()
+
+                        val centroidMovedHorizontally =
+                            abs(pan.x) > abs(pan.y) && abs(pan.x) > 0.5f
+
+                        val isPinch = pressedCount > 1 && zoom != 1f
+                        val isZoomed = scale > 1f
+
+                        // Golden rule + horizontal priority:
+                        // - At base scale, single pointer, horizontal movement => let pager have it (never consume)
+                        // - If pinch OR already zoomed => we own it and consume
+                        if (!gestureOwns) {
+                            gestureOwns =
+                                isPinch || isZoomed || (pressedCount > 1) || (scale == 1f && !centroidMovedHorizontally && zoom != 1f)
                         }
+
+                        if (!gestureOwns && scale == 1f && pressedCount == 1 && centroidMovedHorizontally) {
+                            // Pass-through: do not consume, do not update state.
+                            continue
+                        }
+
+                        // If we got here, we are handling zoom/pan => consume.
+                        if (gestureOwns) {
+                            changes.forEach { it.consumePositionChange() }
+                        }
+
+                        // Apply zoom immediately (pinch).
+                        val newScale = (scale * zoom).coerceIn(1f, 3f)
+                        scale = newScale
+
+                        // Apply pan only when zoomed.
+                        offset =
+                            if (newScale <= 1f) {
+                                Offset.Zero
+                            } else {
+                                clampPanOffset(offset + pan, newScale, containerSize)
+                            }
+                    }
                 }
             }
             .graphicsLayer {
