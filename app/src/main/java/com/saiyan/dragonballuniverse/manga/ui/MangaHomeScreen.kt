@@ -1,5 +1,6 @@
 package com.saiyan.dragonballuniverse.manga.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -20,11 +21,13 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.saiyan.dragonballuniverse.manga.MangaArc
 import com.saiyan.dragonballuniverse.manga.MangaHomeUiState
@@ -38,6 +41,16 @@ fun MangaHomeScreen(
     onOpenChapter: (arc: MangaArc, chapterNumber: Int) -> Unit,
 ) {
     val state by viewModel.homeUiState.collectAsState()
+    val context = LocalContext.current
+
+    LaunchedEffect(state) {
+        val s = state
+        if (s is MangaHomeUiState.Error) {
+            Toast
+                .makeText(context, "Manga load error: ${s.details}", Toast.LENGTH_LONG)
+                .show()
+        }
+    }
 
     // Main arcs
     val tabs = listOf(MangaArc.CLASSIC, MangaArc.Z, MangaArc.SUPER)
@@ -100,6 +113,12 @@ fun MangaHomeScreen(
                         Text(
                             text = "حدث خطأ: ${s.message}",
                             color = MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(Modifier.padding(6.dp))
+                        Text(
+                            text = "تفاصيل: ${s.details}",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
                         )
                         Spacer(Modifier.padding(8.dp))
                         Text(

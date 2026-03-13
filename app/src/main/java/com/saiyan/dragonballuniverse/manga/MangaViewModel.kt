@@ -24,6 +24,7 @@ sealed interface MangaHomeUiState {
 
     data class Error(
         val message: String,
+        val details: String,
     ) : MangaHomeUiState
 }
 
@@ -88,7 +89,16 @@ class MangaViewModel(
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-                _homeUiState.value = MangaHomeUiState.Error(e.message ?: "Unknown error")
+                val details =
+                    buildString {
+                        append(e::class.java.simpleName)
+                        e.message?.let { append(": ").append(it) }
+                    }
+                _homeUiState.value =
+                    MangaHomeUiState.Error(
+                        message = e.message ?: "Unknown error",
+                        details = details,
+                    )
             }
         }
     }

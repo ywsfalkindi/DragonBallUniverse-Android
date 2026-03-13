@@ -16,6 +16,13 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        // PocketBase base URL.
+        // - Emulator: http://10.0.2.2:8090/api/
+        // - Physical device: http://<YOUR_PC_LAN_IP>:8090/api/
+        //
+        // Change this value to your computer's LAN IP when testing on a real phone.
+        buildConfigField("String", "POCKETBASE_BASE_URL", "\"http://192.168.3.23:8090/api/\"")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
