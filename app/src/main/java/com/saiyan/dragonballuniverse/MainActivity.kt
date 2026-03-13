@@ -7,6 +7,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import com.saiyan.dragonballuniverse.manga.MangaArc
+import com.saiyan.dragonballuniverse.manga.MangaViewModel
+import com.saiyan.dragonballuniverse.manga.ui.MangaChapterReaderScreen
+import com.saiyan.dragonballuniverse.manga.ui.MangaHomeScreen
 import com.saiyan.dragonballuniverse.quiz.QuizMainScreen
 import com.saiyan.dragonballuniverse.quiz.QuizViewModel
 import androidx.compose.animation.core.LinearEasing
@@ -102,8 +106,12 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import coil.Coil
+import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.saiyan.dragonballuniverse.BuildConfig
+import com.saiyan.dragonballuniverse.network.UnsafeOkHttp
 import com.saiyan.dragonballuniverse.ui.theme.DarkBackground
 import com.saiyan.dragonballuniverse.ui.theme.DragonBallUniverseTheme
 import com.saiyan.dragonballuniverse.ui.theme.GokuOrange
@@ -117,15 +125,34 @@ class MainActivity : ComponentActivity() {
 
     private val mainViewModel: MainViewModel by viewModels()
     private val quizViewModel: QuizViewModel by viewModels()
+    private val mangaViewModel: MangaViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // DEBUG-ONLY: Make Coil trust self-signed/untrusted TLS for Manga page images.
+        //
+        // NOTE: Do NOT install this as a global Coil ImageLoader. Doing so may impact other
+        // parts of the app and can trigger unexpected platform behavior on some devices.
+        //
+        // Manga screens should use a dedicated Coil ImageLoader / OkHttp client instead.
+        //
+        // Keeping this block intentionally disabled for now:
+        // if (BuildConfig.DEBUG) { ... }
+        if (false && BuildConfig.DEBUG) {
+            val imageLoader =
+                ImageLoader.Builder(applicationContext)
+                    .okHttpClient(UnsafeOkHttp.create())
+                    .build()
+            Coil.setImageLoader(imageLoader)
+        }
+
         setContent {
             DragonBallUniverseTheme {
                 DragonBallScaffold(
                     viewModel = mainViewModel,
-                    quizViewModel = quizViewModel
+                    quizViewModel = quizViewModel,
+                    mangaViewModel = mangaViewModel,
                 )
             }
         }
@@ -583,7 +610,8 @@ private val dragonBallManga = Manga(
 @Composable
 private fun DragonBallScaffold(
     viewModel: MainViewModel,
-    quizViewModel: QuizViewModel
+    quizViewModel: QuizViewModel,
+    mangaViewModel: MangaViewModel,
 ) {
     var selectedDestination by rememberSaveable { mutableStateOf(MainDestination.Anime) }
 
@@ -613,9 +641,10 @@ private fun DragonBallScaffold(
         DragonBallHomeContent(
             viewModel = viewModel,
             quizViewModel = quizViewModel,
+            mangaViewModel = mangaViewModel,
             selectedDestination = selectedDestination,
             searchQuery = searchQuery,
-            modifier = Modifier.padding(innerPadding)
+            modifier = Modifier.padding(innerPadding),
         )
     }
 }
@@ -713,16 +742,17 @@ private fun DragonBallBottomBar(
 private fun DragonBallHomeContent(
     viewModel: MainViewModel,
     quizViewModel: QuizViewModel,
+    mangaViewModel: MangaViewModel,
     selectedDestination: MainDestination,
     searchQuery: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
 ) {
     var selectedSeason by rememberSaveable(stateSaver = NullableAnimeSeasonSaver) { mutableStateOf<AnimeSeason?>(null) }
     var selectedVideoUrl by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedEpisodeId by rememberSaveable { mutableStateOf<String?>(null) }
 
-    var selectedManga by rememberSaveable { mutableStateOf<Manga?>(null) }
-    var selectedMangaChapterNumber by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedMangaArc by rememberSaveable { mutableStateOf<MangaArc?>(null) }
+    var selectedMangaChapterNumber by rememberSaveable { mutableStateOf<Int?>(null) }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -759,9 +789,15 @@ private fun DragonBallHomeContent(
         return
     }
 
-    if (selectedMangaChapterNumber != null) {
-        MangaReaderScreen(
-            onBack = { selectedMangaChapterNumber = null }
+    if (selectedMangaArc != null && selectedMangaChapterNumber != null) {
+        MangaChapterReaderScreen(
+            arc = selectedMangaArc!!,
+            chapterNumber = selectedMangaChapterNumber!!,
+            onBack = {
+                selectedMangaArc = null
+                selectedMangaChapterNumber = null
+            },
+            viewModel = mangaViewModel,
         )
         return
     }
@@ -845,15 +881,12 @@ private fun DragonBallHomeContent(
         }
 
         MainDestination.Manga -> {
-            if (selectedManga == null) {
-                selectedManga = dragonBallManga
-            }
-            MangaDetailsScreen(
-                manga = selectedManga ?: dragonBallManga,
-                modifier = modifier,
-                onChapterClick = { chapter ->
-                    selectedMangaChapterNumber = chapter.number
-                }
+            MangaHomeScreen(
+                viewModel = mangaViewModel,
+                onOpenChapter = { arc, chapterNumber ->
+                    selectedMangaArc = arc
+                    selectedMangaChapterNumber = chapterNumber
+                },
             )
         }
 

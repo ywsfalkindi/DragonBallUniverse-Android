@@ -1,274 +1,423 @@
 # Implementation Plan
 
-[Overview]  
-Implement Phase 1 of the Quiz overhaul by adding animated question transitions, an urgency-aware timer, sound effects for answer feedback, and difficulty-driven dynamic backgrounds, while keeping the existing MVVM + Room stats flow intact.
+[Overview]
+رفع جودة قسم المانجا ليصبح قارئ صفحات حقيقي سريع وسلس مع دعم أوفلاين كامل وحفظ تقدم القراءة محليًا.
 
-This phase focuses purely on “feel”: smooth UI motion, clear time pressure, immediate feedback, and stronger visual theming per question difficulty. It intentionally avoids Phase 2+ features (currency/lifelines/adaptive difficulty/Firebase/NTP/leaderboards) so the rollout is incremental and low-risk.
+حاليًا قسم المانجا في المشروع عبارة عن شاشة تفاصيل بسيطة (عنوان + وصف + قائمة فصول) مع قارئ تجريبي يعرض أيقونة ثابتة كصفحات (5 صفحات) داخل `HorizontalPager` مع تكبير/تحريك. هذا لا يحقق هدف “قارئ مانجا حقيقي” ولا يدعم: جلب صفحات حقيقية، إدارة أجزاء (Classic/Z/Super)، حفظ آخر صفحة، تعليم الفصول كمكتملة، تنزيل فصل بالكامل، أو كاش ذكي لاستكمال القراءة بدون إنترنت.
 
-The current Quiz feature uses `QuizViewModel` (state machine via `QuizUiState` + `QuizSessionState`) and `QuizMainScreen` / `QuizPlayingContent` for UI, with local `dummyQuestions` and `Room` persistence via `UserStatsDao`. Phase 1 will extend the UI layer (Compose) and add a small audio utility, with minimal changes to domain logic. Where logic is required (e.g., “play success/fail sound”), it will be done in a UI-friendly, lifecycle-safe way.
+هذه الخطة تعيد تصميم القسم داخليًا بشكل تدريجي ومتوافق مع المشروع الحالي (Jetpack Compose + Room + Retrofit + Coil/Media3)، مع إبقاء التطبيق “دراغون بول فقط” لتفادي تعقيد دعم سلاسل متعددة. سنضيف طبقة بيانات للمانجا (Models/Network/Repository/DB) ونبني قارئ صفحات متقدم بميزات: RTL، حفظ تقدم مستمر، قائمة صفحات/فهرس، وضع ليلي، تحكم بالسطوع (اختياري إن أمكن)، إيماءات تكبير/سحب محسّنة، وتحميل صفحات مسبقًا (prefetch) لتجربة سلسة.
 
-Key principles:
-- No change to quiz rules, question source, or persistence schema in Phase 1.
-- Compose-only changes should be deterministic and keyed by `q.id` to avoid timer/animation glitches.
-- Sounds are short SFX → use `SoundPool` (per user preference).
-- Background selection is purely visual and derived from `QuizQuestion.difficulty`.
+مصدر البيانات حسب توجيهك: API بسيط أو روابط مباشرة (Direct URLs) عبر JSON يربط رقم الفصل بروابط صور الصفحات. لا توجد متطلبات أمان معقدة الآن، الأولوية للأداء والسلاسة.
 
-[Types]  
-Introduce small Phase-1-only UI and audio support types without changing existing database entities.
+---
 
-New / updated types:
+[Types]
+سنضيف أنواع بيانات جديدة للمانجا (نماذج API/نماذج UI/كيانات قاعدة البيانات) مع قواعد تحقق بسيطة لضمان الاستقرار.
 
-1) `enum class QuizDifficultyUiTier`
-- Purpose: normalize difficulty strings into stable tiers for UI mapping.
-- Values:
-  - `EASY`
-  - `MEDIUM`
-  - `HARD`
-  - `INSANE`
-  - `UNKNOWN`
-- Mapping rule:
-  - From `QuizQuestion.difficulty` string:
-    - `DIFF_EASY` → `EASY`
-    - `DIFF_MEDIUM` → `MEDIUM`
-    - `DIFF_HARD` → `HARD`
-    - `DIFF_INSANE` → `INSANE`
-    - else → `UNKNOWN`
+## Domain/UI Models (Kotlin)
 
-2) `data class QuizBackgroundStyle`
-- Purpose: provide a consistent container of background styling inputs for Compose.
-- Fields:
-  - `val colors: List<Color>` (2–3 colors for gradient)
-  - `val accent: Color` (used for border/highlights)
-  - `val overlayAlpha: Float` (0.0–1.0) optional dimming
-- Validation:
-  - `colors.isNotEmpty()`
-  - `overlayAlpha` clamped to `[0f, 1f]`
+```kotlin
+enum class MangaArc { CLASSIC, Z, SUPER }
 
-3) `sealed class QuizSfx`
-- Purpose: identify which sound to play.
-- Variants:
-  - `data object Correct : QuizSfx`
-  - `data object Wrong : QuizSfx`
+data class MangaChapterInfo(
+  val arc: MangaArc,
+  val chapterNumber: Int,          // رقم الفصل داخل القوس/الجزء
+  val title: String,
+  val releaseYear: String? = null,
+  val pageCount: Int,
+)
 
-4) `interface SoundManager`
-- Purpose: abstraction for sound playback, allowing future replacement/testing.
-- Functions:
-  - `fun play(sfx: QuizSfx)`
-  - `fun release()`
+data class MangaPage(
+  val pageIndex: Int,              // يبدأ من 0
+  val imageUrl: String,            // https only (نقوم بتسوية http->https)
+)
 
-5) `class SoundPoolSoundManager(...) : SoundManager`
-- Purpose: SoundPool-backed implementation.
+data class MangaChapterPages(
+  val arc: MangaArc,
+  val chapterNumber: Int,
+  val pages: List<MangaPage>
+)
+```
 
-No changes in Phase 1 to:
-- `UserStatsEntity`
-- `UserStatsDao`
-- `QuizSessionState` fields
-- `QuizUiState` variants
-- `QuizQuestion` schema
+### Validation Rules
+- `chapterNumber > 0`
+- `pageIndex >= 0` و `pages` مرتبة تصاعديًا.
+- `imageUrl` غير فارغ، ونقوم بتطبيق `resolveImageUrl()` أو مكافئ خاص بالمانجا لمنع `http://` عند الإمكان.
+- `pageCount == pages.size` (إذا كانت القيمة موجودة في الميتاداتا).
 
-[Files]  
-Modify the quiz UI and add a dedicated sound manager with raw audio resources.
+## Network DTOs (Retrofit/Gson)
 
-Existing files to be modified:
+نفترض JSON بسيط:
+- Endpoint 1: ميتاداتا الفصول (لكل Arc)
+- Endpoint 2: صفحات فصل محدد
 
-1) `app/src/main/java/com/saiyan/dragonballuniverse/quiz/QuizScreen.kt`
-- Add `AnimatedContent` around the question card + options so each question transition animates (slide/fade or scale/fade).
-- Update timer UI:
-  - Keep existing 15s logic but add:
-    - urgency detection for last 5 seconds (remainingMs <= 5000)
-    - `animateColorAsState` to shift progress color from normal (e.g., `GokuOrange`) to red.
-    - blinking effect in last 5 seconds (alpha pulsing) using an infinite transition.
-- Integrate SoundManager usage:
-  - Create/remember `SoundPoolSoundManager` in `QuizPlayingContent` (or higher) and release via `DisposableEffect`.
-  - On answer selection:
-    - If correct → play `QuizSfx.Correct`
-    - Else → play `QuizSfx.Wrong`
-  - On time expiry treat as wrong → play `QuizSfx.Wrong` once.
-- Add dynamic backgrounds driven by difficulty:
-  - Replace the fixed `DarkBackground` in the playing screen container with a per-question background (e.g., gradient).
-  - Ensure home/results screens remain unchanged (still `DarkBackground`) unless explicitly desired.
+```kotlin
+data class MangaChaptersResponseDto(
+  val arc: String,                 // "classic" | "z" | "super"
+  val chapters: List<MangaChapterDto>
+)
 
-2) `app/src/main/java/com/saiyan/dragonballuniverse/quiz/QuizViewModel.kt`
-- No behavioral changes required for Phase 1.
-- Optional minimal addition (only if needed for cleaner UI triggers):
-  - Expose last answer result in session state (NOT required; prefer local UI decision based on correctness already computed in `QuizScreen`).
+data class MangaChapterDto(
+  val chapterNumber: Int,
+  val title: String,
+  val releaseYear: String?,
+  val pages: List<String>          // روابط مباشرة لصور الصفحات
+)
+```
 
-3) `app/src/main/java/com/saiyan/dragonballuniverse/db/UserStatsDao.kt`
-- No changes in Phase 1.
+### Mapping
+- `arc` -> `MangaArc` (تحويل آمن مع fallback).
+- `pages` -> `List<MangaPage>` عبر `mapIndexed`.
 
-New files to be created:
+## Room Entities (داخل user_db الحالي)
 
-1) `app/src/main/java/com/saiyan/dragonballuniverse/quiz/audio/SoundManager.kt`
-- Define `QuizSfx`, `SoundManager` interface, and `SoundPoolSoundManager` implementation.
+### 1) تقدم القراءة
+```kotlin
+@Entity(tableName = "user_manga_progress", primaryKeys = ["arc", "chapterNumber"])
+data class UserMangaProgressEntity(
+  val arc: String,                 // نخزن نصيًا لتجنب مشاكل Room مع enum بدون converters
+  val chapterNumber: Int,
+  val lastReadPageIndex: Int = 0,
+  val isCompleted: Boolean = false,
+  val updatedAtEpochMs: Long = 0L
+)
+```
 
-2) `app/src/main/java/com/saiyan/dragonballuniverse/quiz/ui/QuizBackgrounds.kt`
-- Provide:
-  - difficulty → `QuizBackgroundStyle` mapping
-  - helper to normalize difficulty strings to `QuizDifficultyUiTier`
+### 2) تنزيلات الأوفلاين (الفصل كحزمة)
+```kotlin
+@Entity(tableName = "user_manga_downloads", primaryKeys = ["arc", "chapterNumber"])
+data class UserMangaDownloadEntity(
+  val arc: String,
+  val chapterNumber: Int,
+  val status: String,              // "queued" | "downloading" | "completed" | "failed"
+  val totalPages: Int,
+  val downloadedPages: Int,
+  val bytesDownloaded: Long = 0L,
+  val localFolder: String?,        // مسار مجلد التخزين (داخل app storage)
+  val errorMessage: String? = null,
+  val updatedAtEpochMs: Long = 0L
+)
+```
 
-New resources to be created:
+### 3) فهرس الصفحات المحلية (اختياري لكنه مفيد للكاش القابل للاستعلام)
+```kotlin
+@Entity(tableName = "user_manga_page_cache", primaryKeys = ["arc", "chapterNumber", "pageIndex"])
+data class UserMangaPageCacheEntity(
+  val arc: String,
+  val chapterNumber: Int,
+  val pageIndex: Int,
+  val imageUrl: String,
+  val localFilePath: String?,      // null إذا لم تُحمّل بعد
+  val cachedAtEpochMs: Long = 0L
+)
+```
 
-1) `app/src/main/res/raw/quiz_correct.mp3` (or `.wav` / `.ogg`)
-2) `app/src/main/res/raw/quiz_wrong.mp3`
+### ملاحظة مهمة عن القاعدة الحالية
+قاعدة البيانات `UserDatabase` حالياً فيها:
+- `UserEpisodeEntity` (مفضلة + watchProgress)
+- `UserStatsEntity` (غير مُستعرض هنا)
 
-Configuration files to be modified:
+ويتم بناء DB مع `fallbackToDestructiveMigration()`. هذا يعني أن أي زيادة جداول قد تمسح بيانات المستخدم عند تغيير version. ضمن الخطة سنزيل `fallbackToDestructiveMigration()` ونضيف `Migration` حتى لا نخسر بيانات المفضلة وتقدم الأنمي.
 
-1) `app/build.gradle.kts`
-- Ensure `android {}` has `buildFeatures { compose = true }` already (likely present).
-- Add nothing for SoundPool (platform API), but ensure `res/raw` inclusion is standard (no config needed).
-- If `AnimatedContent` requires a newer Compose animation artifact than currently used, bump Compose BOM / versions in:
-  - `gradle/libs.versions.toml` and/or `app/build.gradle.kts`
-  - Only if compilation reveals missing symbols.
+---
 
-Files to be deleted/moved:
-- None in Phase 1.
+[Files]
+سنضيف ملفات جديدة للمانجا (network/repository/db/ui) ونعدّل ملفات قائمة (MainActivity و Room DB و Gradle إن احتجنا).
 
-[Functions]  
-Add utility functions for difficulty mapping/background selection and sound playback lifecycle.
+## New Files (مع المسار والغرض)
 
-1) `fun difficultyToUiTier(difficulty: String): QuizDifficultyUiTier`
-- Purpose: Convert `QuizQuestion.difficulty` to a stable enum.
-- Params:
-  - `difficulty: String`
-- Returns:
-  - `QuizDifficultyUiTier`
+### Network
+- `app/src/main/java/com/saiyan/dragonballuniverse/network/MangaApiService.kt`  
+  Retrofit endpoints للمانجا (chapters + chapter pages).
+- `app/src/main/java/com/saiyan/dragonballuniverse/network/MangaDtos.kt`  
+  DTOs الخاصة بـ JSON للمانجا.
+- `app/src/main/java/com/saiyan/dragonballuniverse/network/MangaRetrofitClient.kt`  
+  Retrofit client منفصل أو دمج داخل `JikanRetrofitClient` (الأفضل فصل لتفادي baseUrl مختلف).
+
+### Data/Repository
+- `app/src/main/java/com/saiyan/dragonballuniverse/manga/MangaModels.kt`  
+  `MangaArc`, `MangaChapterInfo`, `MangaPage`, `MangaChapterPages`.
+- `app/src/main/java/com/saiyan/dragonballuniverse/manga/MangaRepository.kt`  
+  واجهة + تنفيذ يجلب من الشبكة + يدمج مع حالات Room.
+- `app/src/main/java/com/saiyan/dragonballuniverse/manga/MangaRepositoryImpl.kt`  
+  Implementation.
+
+### Room
+- `app/src/main/java/com/saiyan/dragonballuniverse/db/MangaProgressDao.kt`
+- `app/src/main/java/com/saiyan/dragonballuniverse/db/MangaDownloadDao.kt`
+- `app/src/main/java/com/saiyan/dragonballuniverse/db/MangaPageCacheDao.kt` (اختياري)
+- `app/src/main/java/com/saiyan/dragonballuniverse/db/UserMangaProgressEntity.kt`
+- `app/src/main/java/com/saiyan/dragonballuniverse/db/UserMangaDownloadEntity.kt`
+- `app/src/main/java/com/saiyan/dragonballuniverse/db/UserMangaPageCacheEntity.kt` (اختياري)
+- `app/src/main/java/com/saiyan/dragonballuniverse/db/migrations/Migration_2_3.kt`  
+  Migration يحافظ على بيانات الجداول الحالية ويضيف الجداول الجديدة.
+
+### UI (Compose)
+- `app/src/main/java/com/saiyan/dragonballuniverse/manga/ui/MangaHomeScreen.kt`  
+  شاشة: Tabs للأجزاء Classic/Z/Super + قائمة فصول مع بحث/فلترة + حالات التحميل.
+- `app/src/main/java/com/saiyan/dragonballuniverse/manga/ui/MangaChapterReaderScreen.kt`  
+  قارئ صفحات حقيقي: Pager + حفظ الصفحة + تحميل/كاش.
+- `app/src/main/java/com/saiyan/dragonballuniverse/manga/ui/MangaReaderTopBar.kt`  
+  شريط علوي: رجوع + مؤشر صفحة + زر فهرس + إعدادات القراءة.
+- `app/src/main/java/com/saiyan/dragonballuniverse/manga/ui/MangaDownloadBottomSheet.kt`  
+  واجهة تنزيل فصل/إدارة أوفلاين.
+- `app/src/main/java/com/saiyan/dragonballuniverse/manga/ui/MangaComponents.kt`  
+  عناصر UI مشتركة: Chapter card, progress chip, offline badge, shimmer.
+- `app/src/main/java/com/saiyan/dragonballuniverse/manga/ui/MangaUiState.kt`  
+  sealed states للشاشات.
+
+### ViewModel
+- `app/src/main/java/com/saiyan/dragonballuniverse/manga/MangaViewModel.kt`  
+  يجمع بين API و Room، ويحرك UI states، ويطبق prefetch.
+
+### Offline/Cache
+- `app/src/main/java/com/saiyan/dragonballuniverse/manga/offline/MangaOfflineManager.kt`  
+  مسؤول عن تنزيل صفحات فصل وحفظها في التخزين وإدارة الحالة.
+- `app/src/main/java/com/saiyan/dragonballuniverse/manga/offline/MangaFileStore.kt`  
+  مسارات الملفات، أسماء ثابتة، تنظيف.
+- `app/src/main/java/com/saiyan/dragonballuniverse/manga/offline/MangaImageLoader.kt`  
+  منطق اختيار المصدر: local file إن وجد وإلا remote url + Coil.
+
+## Existing Files to Modify
+
+- `app/src/main/java/com/saiyan/dragonballuniverse/MainActivity.kt`
+  - فصل كود المانجا الحالي من الملف (حاليًا ملف ضخم يحوي كل UI) إلى ملفات `manga/*`.
+  - استبدال `MangaDetailsScreen` الحالية بمدخل `MangaHomeScreen` + `MangaChapterReaderScreen`.
+  - إزالة/إهمال `dragonBallManga` و `MangaReaderScreen` التجريبي أو تحويله لنسخة جديدة.
+
+- `app/src/main/java/com/saiyan/dragonballuniverse/db/UserDatabase.kt`
+  - زيادة version من 2 إلى 3.
+  - إزالة `fallbackToDestructiveMigration()`.
+  - إضافة `.addMigrations(MIGRATION_2_3)`.
+
+- `app/build.gradle.kts` (إن احتجنا)
+  - تأكيد dependencies: Room KTX, Retrofit, OkHttp, Coil, WorkManager (اختياري للتنزيلات الخلفية).
+  - إضافة `androidx.work:work-runtime-ktx` إذا قررنا تنزيل بالخلفية.
+
+## Files to Delete / Move
+- لا حذف إلزامي، لكن ننقل Compose الخاص بالمانجا من `MainActivity.kt` إلى `manga/ui/*` لتقليل التضخم.
+- إبقاء أي كود أنمي/كويز كما هو.
+
+---
+
+[Functions]
+سنضيف/نعدل دوال محددة لتغطية: جلب الفصول والصفحات، حفظ تقدم القراءة، تنزيل أوفلاين، اختيار مصدر الصورة، وتحسين الأداء عبر prefetch.
+
+## Network
+
+### `MangaApiService.getChapters`
+```kotlin
+@GET("manga/dragonball/{arc}/chapters")
+suspend fun getChapters(@Path("arc") arc: String): MangaChaptersResponseDto
+```
+- Purpose: إرجاع قائمة فصول لقوس محدد.
+- Errors: يعاد رمي exceptions؛ التعامل يكون في repository/viewmodel.
+
+### `MangaApiService.getChapter`
+```kotlin
+@GET("manga/dragonball/{arc}/chapters/{chapterNumber}")
+suspend fun getChapter(
+  @Path("arc") arc: String,
+  @Path("chapterNumber") chapterNumber: Int
+): MangaChapterDto
+```
+- Purpose: إرجاع صفحات فصل محدد (روابط الصور).
+- Validation: التأكد من pages ليست فارغة.
+
+## Repository
+
+### `MangaRepository.getChapters(arc: MangaArc): Flow<List<MangaChapterInfoWithUserState>>`
+- يجلب من API + يدمج مع Room (lastReadPage, completed, downloaded badge).
+- `MangaChapterInfoWithUserState`:
+  ```kotlin
+  data class MangaChapterInfoWithUserState(
+    val info: MangaChapterInfo,
+    val lastReadPageIndex: Int,
+    val isCompleted: Boolean,
+    val isDownloaded: Boolean
+  )
+  ```
+- Errors: emits error state في UI، مع retry.
+
+### `MangaRepository.getChapterPages(arc: MangaArc, chapterNumber: Int): MangaChapterPages`
+- يجلب DTO ثم يحولها لـ `MangaChapterPages`.
+
+### `MangaRepository.updateProgress(arc, chapterNumber, lastReadPageIndex, isCompleted)`
+- يكتب إلى `user_manga_progress`.
+
+## Room DAOs
+
+### `MangaProgressDao.upsertProgress(entity: UserMangaProgressEntity)`
+- replace on conflict.
+
+### `MangaProgressDao.getProgress(arc: String, chapterNumber: Int): UserMangaProgressEntity?`
+
+### `MangaDownloadDao.upsert(entity: UserMangaDownloadEntity)`
+### `MangaDownloadDao.get(arc: String, chapterNumber: Int): UserMangaDownloadEntity?`
+
+(وإذا أضفنا PageCacheDao: upsert/query by chapter).
+
+## Offline/Cache
+
+### `MangaOfflineManager.downloadChapter(arc: MangaArc, chapterNumber: Int, pages: List<MangaPage>): Flow<DownloadProgress>`
+- يقوم بتحميل الصفحات بشكل متسلسل/محدود التوازي (2-4) لتوازن الأداء.
+- يحفظ كل صفحة كملف داخل:
+  - `context.filesDir/manga/{arc}/{chapterNumber}/{pageIndex}.jpg`
+- يحدث `UserMangaDownloadEntity` دوريًا.
+- التعامل مع الأخطاء: mark failed مع errorMessage، وتترك الملفات الجزئية (أو تنظف حسب سياسة).
+
+### `MangaImageLoader.resolvePageModel(arc, chapterNumber, pageIndex, remoteUrl): Any`
+- يرجّع:
+  - `File` لو متوفر محليًا
+  - وإلا `String url`
+- يستخدم في `AsyncImage`/Coil.
+
+### `prefetchNextPages(currentPageIndex: Int)`
+- عند انتقال صفحة، نطلب Coil fetch لصفحات قادمة (مثلا +2/+3) إذا ليست محليًا.
+
+## UI
+
+### `MangaChapterReaderScreen(...)`
+- Signature مقترح:
+```kotlin
+@Composable
+fun MangaChapterReaderScreen(
+  arc: MangaArc,
+  chapterNumber: Int,
+  onBack: () -> Unit,
+  viewModel: MangaViewModel
+)
+```
 - Behavior:
-  - Match against `DIFF_EASY`, `DIFF_MEDIUM`, `DIFF_HARD`, `DIFF_INSANE`, else `UNKNOWN`.
+  - تحميل صفحات الفصل (state loading/error/success).
+  - Pager RTL (reverseLayout=true) + مؤشر.
+  - حفظ progress عند تغيير الصفحة (debounce 300-800ms).
+  - زر “تنزيل” يظهر bottom sheet.
 
-2) `fun backgroundStyleFor(tier: QuizDifficultyUiTier): QuizBackgroundStyle`
-- Purpose: Map tier to gradient + accent palette.
-- Params:
-  - `tier: QuizDifficultyUiTier`
-- Returns:
-  - `QuizBackgroundStyle`
-- Suggested palettes (example):
-  - EASY: green/teal gradient, gentle accent
-  - MEDIUM: blue/purple gradient
-  - HARD: orange/red gradient
-  - INSANE: deep red/purple/black gradient with stronger accent
+---
 
-3) `@Composable fun QuizDifficultyBackground(tier: QuizDifficultyUiTier, modifier: Modifier = Modifier, content: @Composable () -> Unit)`
-- Purpose: Apply background consistently in one place.
-- Behavior:
-  - Use `Brush.linearGradient` / `Brush.radialGradient`.
-  - Add subtle overlay for readability if needed.
-  - Render `content()` on top.
+[Changes]
+سننفذ التحسينات كحزمة متكاملة لكن بخطوات صغيرة قابلة للتحقق.
 
-4) `class SoundPoolSoundManager(context: Context) : SoundManager`
-- Key functions:
-  - `override fun play(sfx: QuizSfx)`
-    - loads (or preloads) sound IDs for correct/wrong
-    - plays with reasonable volume (e.g., 1f left/right)
-    - handles “not loaded yet” edge: preload in init, ignore play until loaded or keep a fallback load listener
-  - `override fun release()`
-    - `soundPool.release()`
-- Error handling:
-  - If audio fails to load/play, swallow exception and continue gameplay (no crashes).
-  - Avoid repeated loads on recomposition: instantiate in `remember` and clean up in `DisposableEffect`.
+1) **تفكيك قسم المانجا من `MainActivity.kt`**
+   - إنشاء package `manga/` و `manga/ui/`.
+   - نقل النماذج الحالية (`Manga`, `MangaChapter`, screens) أو استبدالها تدريجيًا.
+   - إبقاء Navigation الداخلي بسيط داخل Compose state (كما المشروع حالياً) لتجنب إدخال NavHost كبير الآن.
 
-5) `@Composable fun rememberSoundManager(): SoundManager`
-- Purpose: Compose-friendly factory.
-- Behavior:
-  - uses `LocalContext.current`
-  - `remember { SoundPoolSoundManager(context) }`
-  - `DisposableEffect(Unit) { onDispose { release() } }`
+2) **إضافة طبقة Network للمانجا**
+   - إنشاء `MangaApiService` + DTOs + Retrofit client.
+   - إضافة baseUrl خاص (حتى لو مؤقت) أو استخدام نفس Retrofit إذا نفس الدومين.
+   - توحيد تسوية الروابط `http->https` (مثل `resolveImageUrl` الموجود) مع تخصيص لصور الصفحات.
 
-6) Timer UI helpers in `QuizScreen.kt`:
-- `val isUrgent = remainingMs <= 5000`
-- `val targetColor = if (isUrgent) Color.Red else GokuOrange`
-- `val animatedColor by animateColorAsState(targetColor, ...)`
-- Blink:
-  - `val alpha by infiniteTransition.animateFloat(...)`
-  - Apply alpha only when urgent.
+3) **إضافة جداول Room وحفظ البيانات داخل `user_db`**
+   - إضافة Entities + DAOs + تحديث `UserDatabase`.
+   - كتابة Migration 2->3 لإضافة الجداول بدون مسح `user_episodes`.
+   - إزالة destructive migration نهائيًا للحفاظ على بيانات المستخدم.
 
-[Changes]  
-Implement Phase 1 by refactoring `QuizPlayingContent` to wrap question content in `AnimatedContent`, augmenting the timer composable with urgency animation, adding a SoundPool manager, and applying a difficulty-based background wrapper.
+4) **Repository + ViewModel للمانجا**
+   - `MangaRepositoryImpl` ينسّق:
+     - جلب chapters من API
+     - دمج progress/download من Room
+     - جلب صفحات فصل
+   - `MangaViewModel`:
+     - `StateFlow<MangaHomeUiState>`
+     - `StateFlow<MangaReaderUiState>`
+     - وظائف: `loadChapters(arc)`, `openChapter(arc, chapterNumber)`, `saveProgress(...)`, `toggleCompleted(...)`, `downloadChapter(...)`
 
-Step-by-step plan:
+5) **UI: MangaHomeScreen (Classic/Z/Super)**
+   - Tabs ثلاثية ثابتة.
+   - قائمة فصول لكل تبويب مع:
+     - شارة “مكتمل”
+     - شريط تقدم (آخر صفحة / عدد الصفحات)
+     - شارة “متاح أوفلاين”
+     - بحث داخل الجزء (فلترة by title/chapter).
+   - تحسين UX:
+     - skeleton/shimmer أثناء التحميل
+     - retry واضح عند الخطأ
+     - empty state في حال API فاضي
 
-1) Add audio resources
-- Create `app/src/main/res/raw/quiz_correct.*` and `quiz_wrong.*`.
-- Keep files small (short SFX).
-- Verify they’re packaged by building the app.
+6) **UI: قارئ صفحات حقيقي MangaChapterReaderScreen**
+   - Pager RTL بتحميل صور حقيقية عبر Coil.
+   - Gestures:
+     - تكبير pinch + سحب داخل الصورة (إعادة استخدام منطقك الحالي clampPanOffset/transformGestures لكن مطبق على صورة الصفحة).
+     - تبديل الصفحة بالسوَيب، مع تعطيل السحب أثناء تكبير (حتى لا يتعارض).
+   - Top bar:
+     - مؤشر (page / total)
+     - زر فهرس صفحات (BottomSheet: Grid thumbnails) — *مرحلة ثانية إذا الوقت ضيق*.
+     - زر تنزيل/إدارة أوفلاين.
+   - Resume:
+     - عند فتح الفصل، الانتقال تلقائياً لآخر صفحة محفوظة.
+   - Completion:
+     - عند الوصول لآخر صفحة وتجاوزها/تأكيد، تعليم الفصل مكتمل.
 
-2) Create the sound manager abstraction
-- Add `quiz/audio/SoundManager.kt`:
-  - `QuizSfx`, `SoundManager`, `SoundPoolSoundManager`.
-- Implementation details:
-  - Use `SoundPool.Builder().setMaxStreams(2).build()`.
-  - `load(context, resId, 1)` for correct/wrong.
-  - Optionally track loaded state using `setOnLoadCompleteListener`.
-  - `play(soundId, 1f, 1f, 1, 0, 1f)`.
+7) **Offline: تنزيل فصل + كاش ذكي**
+   - سياسة الكاش:
+     - الاعتماد على Coil DiskCache للعرض السريع.
+     - بالإضافة لتنزيل “ملفات” داخل app storage لفصل كامل لتضمن العمل بدون إنترنت حتى لو Coil مسح الكاش.
+   - تنزيل:
+     - زر “تنزيل الفصل”.
+     - عرض تقدم: صفحات محمّلة/المتبقي.
+     - إمكانية إلغاء (اختياري).
+   - أثناء القراءة:
+     - إذا الصفحة غير محلية والإنترنت مقطوع: عرض رسالة + زر retry + إمكانية الانتقال للصفحات المحفوظة.
+   - تنظيف:
+     - صفحة إعدادات بسيطة: “مسح تنزيلات المانجا” أو “مسح فصل” (مرحلة ثانية).
 
-3) Create difficulty → UI tier + background mapping
-- Add `quiz/ui/QuizBackgrounds.kt`:
-  - `QuizDifficultyUiTier`
-  - `difficultyToUiTier`
-  - `backgroundStyleFor`
-  - `QuizDifficultyBackground` composable
-- Ensure background is only applied in playing mode so Home/Results remain stable.
+8) **تحسين الأداء**
+   - Prefetch صفحات قادمة.
+   - تقليل إعادة التركيب:
+     - استعمال `remember` و `derivedStateOf` للأشياء الثقيلة.
+   - تحميل الصور:
+     - استخدام `ImageRequest` مع `diskCacheKey` ثابت (arc/chapter/page).
+     - تعيين `size` مناسب (match device width) لتقليل memory.
+   - Network:
+     - إضافة OkHttp cache headers إن أمكن (مع Direct URLs غالبًا لا).
+     - Timeouts/retry بسيط في Repository.
 
-4) Update `QuizPlayingContent` to apply dynamic background
-- In `QuizMainScreen`, inside `QuizUiState.Playing`, or inside `QuizPlayingContent`:
-  - compute `val tier = difficultyToUiTier(q.difficulty)`
-  - wrap existing `Column` with `QuizDifficultyBackground(tier) { ... }`
-- Make sure padding/readability remain good.
+9) **الأمان (بالحد الأدنى المطلوب)**
+   - إجبار https عند الإمكان.
+   - رفض الروابط الفارغة.
+   - تجنب logging لروابط حساسة (ليس مطلوب لكن جيد).
+   - Network Security Config إن كانت الصور http (إذا اضطررنا) — لكن الأفضل تحويلها لـ https.
 
-5) Implement AnimatedContent for question transitions
-- Wrap the question + answers region in:
-  - `AnimatedContent(targetState = q.id, transitionSpec = { ... }) { ... }`
-- Use `q.id` (or `session.currentIndex`) as the target state key so animation triggers on next question.
-- Inside the animated block, render:
-  - question `Card`
-  - answer buttons
-- Keep timer outside animated block if you want timer to reset cleanly per question; or key timer state by `q.id` as currently done (it is keyed by `remember(q.id)`), which is correct.
+10) **تحسينات واجهة “هائلة” (من جميع النواحي)**
+   - UX:
+     - “استكمال القراءة” زر في MangaHome يفتح آخر فصل/صفحة مباشرة.
+     - “آخر ما قرأت” Section.
+     - شريط تحكم سريع داخل القارئ: تغيير اتجاه القراءة (RTL/LTR)، تبديل وضع single/continuous (مرحلة ثانية).
+   - Visual:
+     - غلاف/بنر لكل جزء (Classic/Z/Super).
+     - لقطات صغيرة للفصول (thumbnails) إن توفرت.
+     - micro-interactions: bounceClick موجود — نعيد استخدامه.
+   - Accessibility:
+     - تكبير النص في قائمة الفصول، تباين ألوان، contentDescriptions.
+   - Reliability:
+     - حفظ progress باستمرار مع debounce لتقليل writes.
+     - مقاومة انقطاع الشبكة.
+   - Analytics (اختياري):
+     - counts محلية (بدون خدمات خارجية): عدد الفصول المكتملة، إجمالي صفحات مقروءة.
 
-6) Upgrade timer to urgency-aware color + blink
-- Derive `remainingMs` already exists.
-- Add:
-  - `isUrgent` when `remainingMs <= 5000`.
-  - `animatedColor` via `animateColorAsState`.
-  - blink alpha via `rememberInfiniteTransition` only when urgent (or always but apply conditionally).
-- Apply `color = animatedColor.copy(alpha = alphaIfUrgent)` to `LinearProgressIndicator`.
+---
 
-7) Add sound playback triggers
-- Instantiate `SoundManager` once per playing session:
-  - `val soundManager = rememberSoundManager()`
-- On answer click:
-  - compute `isCorrect`
-  - call `soundManager.play(if (isCorrect) QuizSfx.Correct else QuizSfx.Wrong)`
-  - then call `onAnswer(index)` as today.
-- On time expiry:
-  - right before `onTimeExpired()`, call `soundManager.play(QuizSfx.Wrong)`
-  - ensure it fires only once by guarding with `localAnswered`.
+[Tests]
+سنركز على اختبارات وحدات للـ mapping والـ repository والمنطق غير UI، مع اختبارات بسيطة للـ Room migrations.
 
-8) Verify lifecycle + recomposition safety
-- Ensure `SoundPool` is released when leaving playing screen:
-  - via `DisposableEffect` inside `rememberSoundManager`.
-- Ensure timer resets correctly on question change (already keyed by `q.id`).
-- Ensure no double sounds: keep `localAnswered` as the single gate.
+- Unit Tests
+  - Mapping: `MangaChapterDto -> MangaChapterPages` يحول الصفحات correctly ويفرض validation.
+  - `resolveImageUrl`/normalizeUrl للصفحات (http->https).
+  - Repository: دمج progress/download مع chapters.
+  - Offline: `MangaFileStore` يبني مسارات صحيحة، و`downloadChapter` يحدث progress.
 
-9) Build & run smoke checks
-- Manual checks:
-  - Animated transition occurs between questions.
-  - Timer turns red and blinks in last 5 seconds.
-  - Correct and wrong sounds play once.
-  - Background changes with difficulty label.
-  - No crashes when leaving quiz or rotating (if supported).
+- Integration Tests (Android instrumented)
+  - Room Migration test: 2->3 بدون فقد بيانات `user_episodes`.
+  - DAO tests: upsert/get progress, downloads.
 
-[Tests]  
-Use a mix of unit tests for mapping utilities and Compose UI tests for basic rendering and state transitions, plus manual verification for audio/animation behavior.
+- Edge Cases
+  - فصل بصفحات فارغة (API خطأ) -> Error UI.
+  - روابط صور بامتدادات مختلفة (jpg/png/webp).
+  - انقطاع الإنترنت أثناء منتصف الفصل مع وجود صفحات محلية جزئية.
+  - فصل كبير (100+ صفحة) -> التأكد من paging/perf.
 
-- Unit tests:
-  - `difficultyToUiTier` mapping for each `DIFF_*` and unknown.
-  - `backgroundStyleFor` returns non-empty colors and valid alpha.
-- Compose UI tests (if test infra exists):
-  - Render `QuizPlayingContent` with a fake session and verify:
-    - difficulty label shown
-    - progress indicator exists
-    - answer buttons count matches options
-  - (Animations are hard to assert; focus on stable nodes/semantics.)
-- Manual verification (required due to audio/animation):
-  - Confirm SFX plays for correct/wrong and not multiple times.
-  - Confirm timer urgency effect triggers at 5s.
-  - Confirm transition is smooth and keyed by question changes.
+- Performance Considerations
+  - قياس memory أثناء التمرير/التكبير.
+  - التأكد من عدم تحميل الصور بجودة أعلى من الحاجة (size override).
