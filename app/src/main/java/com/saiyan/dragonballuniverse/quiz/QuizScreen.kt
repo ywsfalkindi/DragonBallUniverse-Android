@@ -43,6 +43,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import android.widget.Toast
@@ -517,14 +522,72 @@ private fun AnswerButton(
     bounceClick: (onClick: () -> Unit) -> Modifier,
     onClick: () -> Unit
 ) {
+    val shape = RoundedCornerShape(14.dp)
+
+    val glowTransition = rememberInfiniteTransition(label = "answer_glow")
+    val glowAlpha by glowTransition.animateFloat(
+        initialValue = 0.22f,
+        targetValue = 0.42f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 850),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "answer_glow_alpha"
+    )
+
+    val borderBrush = Brush.linearGradient(
+        colors = listOf(
+            VegetaBlue.copy(alpha = 0.95f),
+            GokuOrange.copy(alpha = 0.95f),
+            Color.White.copy(alpha = 0.55f),
+        )
+    )
+
+    val glowColor =
+        if (enabled) {
+            // Subtle, DBZ-ish aura vibe.
+            VegetaBlue.copy(alpha = glowAlpha)
+        } else {
+            Color.Transparent
+        }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .then(
-                if (enabled) bounceClick { onClick() } else Modifier
-            )
-            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(14.dp))
-            .background(Color(0xFF161616), RoundedCornerShape(14.dp))
+            .clip(shape)
+            .then(if (enabled) bounceClick { onClick() } else Modifier)
+            .drawBehind {
+                // Soft outer glow "aura".
+                if (enabled) {
+                    val strokeWidth = 10.dp.toPx()
+                    val half = strokeWidth / 2f
+                    drawRoundRect(
+                        color = glowColor,
+                        topLeft = Offset(-half, -half),
+                        size = size.copy(
+                            width = size.width + strokeWidth,
+                            height = size.height + strokeWidth
+                        ),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                            x = 18.dp.toPx(),
+                            y = 18.dp.toPx()
+                        ),
+                        style = Stroke(width = strokeWidth)
+                    )
+                }
+
+                // Crisp gradient border.
+                val borderStroke = 2.dp.toPx()
+                drawRoundRect(
+                    brush = borderBrush,
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                        x = 14.dp.toPx(),
+                        y = 14.dp.toPx()
+                    ),
+                    style = Stroke(width = borderStroke)
+                )
+            }
+            .background(Color(0xFF161616))
             .padding(horizontal = 14.dp, vertical = 14.dp),
         contentAlignment = Alignment.CenterStart
     ) {
@@ -546,6 +609,24 @@ private fun QuizResultContent(
     onBack: () -> Unit,
     bounceClick: (onClick: () -> Unit) -> Modifier
 ) {
+    // Phase 1: "Power Level" count-up animation (quick, punchy).
+    var animatedPower by remember(powerLevel) { mutableStateOf(0L) }
+    LaunchedEffect(powerLevel) {
+        val start = 0L
+        val end = powerLevel
+        val durationMs = 650
+        val steps = 26
+        animatedPower = start
+        repeat(steps) { i ->
+            val t = (i + 1).toFloat() / steps.toFloat()
+            // Ease-out-ish curve without extra deps.
+            val eased = 1f - (1f - t) * (1f - t)
+            animatedPower = (start + ((end - start) * eased)).toLong()
+            delay((durationMs / steps).toLong())
+        }
+        animatedPower = end
+    }
+
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
@@ -596,7 +677,7 @@ private fun QuizResultContent(
                     Column(horizontalAlignment = Alignment.End) {
                         Text(text = "مستوى الطاقة الحالي", color = Color(0xFFBDBDBD), fontSize = 12.sp)
                         Text(
-                            text = powerLevel.toString(),
+                            text = animatedPower.toString(),
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp

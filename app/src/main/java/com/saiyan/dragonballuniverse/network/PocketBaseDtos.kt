@@ -37,8 +37,8 @@ data class PocketBaseMangaChapterRecord(
 data class PocketBaseQuizQuestionRecord(
     @SerializedName("id")
     val id: String? = null,
-    @SerializedName("question")
-    val question: String? = null,
+    @SerializedName("question_text")
+    val questionText: String? = null,
     @SerializedName("answers")
     val answers: List<String>? = null,
     @SerializedName("correct_answer_index")
@@ -75,4 +75,40 @@ data class PocketBaseUpsertUserStatsBody(
     val highestStreak: Int,
     @SerializedName("last_played_timestamp")
     val lastPlayedTimestamp: Long,
+)
+
+data class PocketBaseUserMangaDownloadRecord(
+    @SerializedName("id")
+    val id: String,
+    @SerializedName("arc")
+    val arc: String,
+    @SerializedName("chapter_number")
+    val chapterNumber: Int,
+    @SerializedName("status")
+    val status: String,
+    @SerializedName("totalPages")
+    val totalPages: Int,
+    @SerializedName("downloadedPages")
+    val downloadedPages: Int,
+    @SerializedName("localFolder")
+    val localFolder: String?,
+    @SerializedName("device_id")
+    val deviceId: String,
+)
+
+data class PocketBaseUpsertUserMangaDownloadBody(
+    @SerializedName("arc")
+    val arc: String,
+    @SerializedName("chapter_number")
+    val chapterNumber: Int,
+    @SerializedName("status")
+    val status: String,
+    @SerializedName("totalPages")
+    val totalPages: Int,
+    @SerializedName("downloadedPages")
+    val downloadedPages: Int,
+    @SerializedName("localFolder")
+    val localFolder: String?,
+    @SerializedName("device_id")
+    val deviceId: String,
 )

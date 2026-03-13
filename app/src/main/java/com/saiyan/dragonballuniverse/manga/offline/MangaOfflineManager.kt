@@ -1,10 +1,14 @@
 package com.saiyan.dragonballuniverse.manga.offline
 
 import android.content.Context
+import android.provider.Settings
+import android.util.Log
 import com.saiyan.dragonballuniverse.db.MangaDownloadDao
 import com.saiyan.dragonballuniverse.db.UserMangaDownloadEntity
 import com.saiyan.dragonballuniverse.manga.MangaArc
 import com.saiyan.dragonballuniverse.manga.MangaPage
+import com.saiyan.dragonballuniverse.network.PocketBaseClient
+import com.saiyan.dragonballuniverse.network.PocketBaseUpsertUserMangaDownloadBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -28,6 +32,10 @@ class MangaOfflineManager(
     private val downloadDao: MangaDownloadDao,
 ) {
     private val client: OkHttpClient = OkHttpClient()
+
+    private fun deviceId(): String =
+        Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+            ?: "unknown_device"
 
     fun downloadChapter(
         arc: MangaArc,
@@ -153,6 +161,7 @@ class MangaOfflineManager(
         localFolder: String?,
         errorMessage: String?,
     ) {
+        // 1) Always update local Room cache (offline-first).
         withContext(Dispatchers.IO) {
             downloadDao.upsert(
                 UserMangaDownloadEntity(
@@ -167,6 +176,45 @@ class MangaOfflineManager(
                     updatedAtEpochMs = System.currentTimeMillis(),
                 ),
             )
+        }
+
+        // 2) Best-effort sync to PocketBase `user_manga_downloads`.
+        // Collection is public (no auth) and keyed by (device_id, arc, chapter_number).
+        try {
+            val did = deviceId()
+            val filter = """device_id="${did}" && arc="${arc.name.lowercase()}" && chapter_number=${chapterNumber}"""
+
+            val existing =
+                PocketBaseClient.apiService
+                    .listUserMangaDownloads(
+                        filter = filter,
+                        page = 1,
+                        perPage = 1,
+                    )
+                    .items
+                    .firstOrNull()
+
+            val body =
+                PocketBaseUpsertUserMangaDownloadBody(
+                    arc = arc.name.lowercase(),
+                    chapterNumber = chapterNumber,
+                    status = status,
+                    totalPages = totalPages,
+                    downloadedPages = downloadedPages,
+                    localFolder = localFolder,
+                    deviceId = did,
+                )
+
+            if (existing == null) {
+                PocketBaseClient.apiService.createUserMangaDownload(body)
+                Log.d("PB_DEBUG", "MangaOffline: created user_manga_downloads for $did ${arc.name}#$chapterNumber")
+            } else {
+                PocketBaseClient.apiService.updateUserMangaDownload(existing.id, body)
+                Log.d("PB_DEBUG", "MangaOffline: updated user_manga_downloads id=${existing.id} for $did ${arc.name}#$chapterNumber")
+            }
+        } catch (e: Exception) {
+            // Don't fail the download flow if PB is unreachable.
+            Log.e("PB_ERROR", "MangaOffline: failed to sync user_manga_downloads", e)
         }
     }
 

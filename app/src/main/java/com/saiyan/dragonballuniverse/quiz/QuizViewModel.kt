@@ -203,44 +203,49 @@ class QuizViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         .items
 
+                Log.d("PB_DEBUG", "Raw JSON from PB: $pbQuestions")
+
+                // Relaxed mapping: do NOT drop records aggressively; provide defaults.
                 val mapped =
-                    pbQuestions.mapIndexedNotNull { idx, r ->
+                    pbQuestions.mapIndexed { idx, r ->
                         // Treat missing is_published as published=true by default.
                         val published = r.isPublished ?: true
-                        if (!published) return@mapIndexedNotNull null
 
-                        val questionText = r.question?.trim().orEmpty()
+                        val questionText = r.questionText?.trim().takeUnless { it.isNullOrBlank() } ?: "Unknown Question"
                         val options =
                             r.answers
                                 ?.filterNotNull()
                                 ?.map { it.trim() }
                                 ?.filter { it.isNotBlank() }
-                                .orEmpty()
+                                ?: emptyList()
 
-                        // Skip records that are too broken to be playable.
-                        // Must have question + at least 2 options.
-                        if (questionText.isBlank() || options.size < 2) return@mapIndexedNotNull null
+                        val normalizedDifficulty =
+                            when (r.difficulty?.trim()) {
+                                DIFF_EASY, DIFF_MEDIUM, DIFF_HARD, DIFF_INSANE -> r.difficulty!!.trim()
+                                else -> DIFF_EASY
+                            }
 
-                        val safeDifficulty = r.difficulty?.takeIf { it.isNotBlank() } ?: DIFF_EASY
-                        val safeIndex = (r.correctAnswerIndex ?: 0).coerceIn(0, options.lastIndex)
+                        val safeIndex =
+                            if (options.isEmpty()) 0
+                            else (r.correctAnswerIndex ?: 0).coerceIn(0, options.lastIndex)
 
                         QuizQuestion(
                             id = idx + 1, // local int id required by current UI
                             text = questionText,
                             options = options,
                             correctAnswerIndex = safeIndex,
-                            difficulty = safeDifficulty,
+                            difficulty = normalizedDifficulty,
                         )
+                    }.filter { q ->
+                        // Only filter out explicitly unpublished questions.
+                        // Also require at least 2 options to be playable.
+                        val src = pbQuestions.getOrNull(q.id - 1)
+                        val published = src?.isPublished ?: true
+                        published && q.options.size >= 2
                     }
 
-                if (mapped.isEmpty()) {
-                    throw IllegalStateException(
-                        "PocketBase returned 0 valid quiz questions. Ensure at least one record has question+answers and is_published!=false.",
-                    )
-                }
-
-                // Allow running with <10 questions; buildSessionQuestions already returns all if <= count.
-                val questions = buildSessionQuestions(mapped, count = 10)
+                val sourceQuestions = if (mapped.isNotEmpty()) mapped else dummyQuestions
+                val questions = buildSessionQuestions(sourceQuestions, count = 10)
 
                 _session.value =
                     QuizSessionState(

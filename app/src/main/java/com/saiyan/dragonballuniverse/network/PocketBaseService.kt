@@ -52,4 +52,23 @@ interface PocketBaseService {
         @Path("id") id: String,
         @Body body: PocketBaseUpsertUserStatsBody,
     ): PocketBaseUserStatsRecord
+
+    @GET("collections/user_manga_downloads/records")
+    suspend fun listUserMangaDownloads(
+        @Query("filter") filter: String? = null,
+        @Query("sort") sort: String? = null,
+        @Query("page") page: Int? = null,
+        @Query("perPage") perPage: Int? = null,
+    ): PocketBaseListResponse<PocketBaseUserMangaDownloadRecord>
+
+    @POST("collections/user_manga_downloads/records")
+    suspend fun createUserMangaDownload(
+        @Body body: PocketBaseUpsertUserMangaDownloadBody,
+    ): PocketBaseUserMangaDownloadRecord
+
+    @PATCH("collections/user_manga_downloads/records/{id}")
+    suspend fun updateUserMangaDownload(
+        @Path("id") id: String,
+        @Body body: PocketBaseUpsertUserMangaDownloadBody,
+    ): PocketBaseUserMangaDownloadRecord
 }

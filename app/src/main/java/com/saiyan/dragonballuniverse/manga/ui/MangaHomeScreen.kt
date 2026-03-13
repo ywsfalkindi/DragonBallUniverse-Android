@@ -20,6 +20,11 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -129,9 +134,26 @@ fun MangaHomeScreen(
                 }
 
                 is MangaHomeUiState.Success -> {
+                    // Simple in-list download UI state (per chapter)
+                    val downloadStatusByChapter = remember { mutableStateMapOf<Int, String>() }
+                    val downloadProgressByChapter = remember { mutableStateMapOf<Int, Pair<Int, Int>>() }
+
                     MangaChapterList(
                         chapters = s.chapters,
-                        onClick = { chapter -> onOpenChapter(chapter.info.arc, chapter.info.chapterNumber) },
+                        downloadStatusByChapter = downloadStatusByChapter,
+                        downloadProgressByChapter = downloadProgressByChapter,
+                        onDownload = { chapter ->
+                            downloadStatusByChapter[chapter.info.chapterNumber] = "downloading"
+                            // Let the ViewModel resolve page URLs and download + track progress.
+                            viewModel.downloadChapter(
+                                arc = chapter.info.arc,
+                                chapterNumber = chapter.info.chapterNumber,
+                            ) { status, done, total ->
+                                downloadStatusByChapter[chapter.info.chapterNumber] = status
+                                downloadProgressByChapter[chapter.info.chapterNumber] = done to total
+                            }
+                        },
+                        onOpen = { chapter -> onOpenChapter(chapter.info.arc, chapter.info.chapterNumber) },
                     )
                 }
             }
@@ -142,7 +164,10 @@ fun MangaHomeScreen(
 @Composable
 private fun MangaChapterList(
     chapters: List<MangaRepository.MangaChapterInfoWithUserState>,
-    onClick: (MangaRepository.MangaChapterInfoWithUserState) -> Unit,
+    downloadStatusByChapter: Map<Int, String>,
+    downloadProgressByChapter: Map<Int, Pair<Int, Int>>,
+    onDownload: (MangaRepository.MangaChapterInfoWithUserState) -> Unit,
+    onOpen: (MangaRepository.MangaChapterInfoWithUserState) -> Unit,
 ) {
     LazyColumn(
         modifier =
@@ -156,7 +181,7 @@ private fun MangaChapterList(
                 modifier =
                     Modifier
                         .fillMaxWidth()
-                        .clickable { onClick(chapter) }
+                        .clickable { onOpen(chapter) }
                         .padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -173,21 +198,48 @@ private fun MangaChapterList(
                     )
                 }
 
+                val dlStatus = downloadStatusByChapter[chapter.info.chapterNumber]
+                val dlProg = downloadProgressByChapter[chapter.info.chapterNumber]
+
                 if (chapter.isDownloaded) {
                     AssistChip(
                         onClick = {},
                         label = { Text("Offline") },
                     )
-                } else if (chapter.isCompleted) {
+                } else if (dlStatus == "downloading") {
+                    val label =
+                        if (dlProg != null) "تحميل ${dlProg.first}/${dlProg.second}"
+                        else "تحميل..."
                     AssistChip(
                         onClick = {},
-                        label = { Text("مكتمل") },
+                        label = { Text(label) },
                     )
-                } else if (chapter.lastReadPageIndex > 0) {
-                    AssistChip(
-                        onClick = {},
-                        label = { Text("صفحة ${chapter.lastReadPageIndex + 1}") },
-                    )
+                } else {
+                    // Enable "Download Chapter" (Phase 2)
+                    Button(
+                        onClick = { onDownload(chapter) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF2E7D32),
+                            contentColor = Color.White,
+                        ),
+                    ) {
+                        Text("Download")
+                    }
+                }
+
+                if (!chapter.isDownloaded && dlStatus == null) {
+                    // keep existing progress chips when not downloaded and not actively downloading
+                    if (chapter.isCompleted) {
+                        AssistChip(
+                            onClick = {},
+                            label = { Text("مكتمل") },
+                        )
+                    } else if (chapter.lastReadPageIndex > 0) {
+                        AssistChip(
+                            onClick = {},
+                            label = { Text("صفحة ${chapter.lastReadPageIndex + 1}") },
+                        )
+                    }
                 }
             }
         }

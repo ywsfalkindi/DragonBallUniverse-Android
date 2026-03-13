@@ -158,19 +158,26 @@ class MangaViewModel(
     fun downloadChapter(
         arc: MangaArc,
         chapterNumber: Int,
-        pages: List<MangaPage>,
+        pages: List<MangaPage>? = null,
         onProgress: (status: String, downloadedPages: Int, totalPages: Int) -> Unit = { _, _, _ -> },
     ) {
         viewModelScope.launch {
-            offlineManager
-                .downloadChapter(
-                    arc = arc,
-                    chapterNumber = chapterNumber,
-                    pages = pages,
-                )
-                .collect { p ->
-                    onProgress(p.status, p.downloadedPages, p.totalPages)
-                }
+            try {
+                val resolvedPages =
+                    pages ?: withContext(Dispatchers.IO) { repository.getChapterPages(arc, chapterNumber).pages }
+
+                offlineManager
+                    .downloadChapter(
+                        arc = arc,
+                        chapterNumber = chapterNumber,
+                        pages = resolvedPages,
+                    )
+                    .collect { p ->
+                        onProgress(p.status, p.downloadedPages, p.totalPages)
+                    }
+            } catch (e: Exception) {
+                onProgress("failed", 0, 0)
+            }
         }
     }
 
