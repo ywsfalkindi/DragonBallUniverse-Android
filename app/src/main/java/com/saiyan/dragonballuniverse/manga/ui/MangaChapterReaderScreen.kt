@@ -2,6 +2,8 @@ package com.saiyan.dragonballuniverse.manga.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.abs
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -27,7 +29,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
@@ -98,11 +99,22 @@ fun MangaChapterReaderScreen(
                     )
                 }
 
+            // PagerState must be created in composition. Key by pages.size so the pager is recreated
+            // if a new pages list arrives (e.g., after async probing/refresh).
             val pagerState =
                 rememberPagerState(
                     initialPage = initial,
                     pageCount = { pages.size },
                 )
+
+            LaunchedEffect(pages.size) {
+                // If pageCount changes, keep current page valid.
+                val maxIndex = (pages.size - 1).coerceAtLeast(0)
+                val target = pagerState.currentPage.coerceIn(0, maxIndex)
+                if (target != pagerState.currentPage) {
+                    pagerState.scrollToPage(target)
+                }
+            }
 
             LaunchedEffect(pagerState.currentPage) {
                 val isLastPage = pagerState.currentPage == pages.lastIndex
@@ -194,17 +206,30 @@ private fun ZoomablePageImage(
         )
     }
 
+    // Pass-through gesture strategy (Tachiyomi-style):
+    // - Pinch (2 fingers): zoom immediately (consume)
+    // - Drag (1 finger) while scale > 1f: pan (consume)
+    // - Drag (1 finger) while scale == 1f: DO NOT consume horizontal drags so HorizontalPager can swipe
+    //   (we only consume when we're actually zooming/panning)
     val gestureModifier =
         Modifier
             .fillMaxSize()
             .onSizeChanged { containerSize = it }
             .pointerInput(Unit) {
                 detectTransformGestures { _, pan, zoom, _ ->
+                    val centroidMovedHorizontally =
+                        abs(pan.x) > abs(pan.y) && abs(pan.x) > 0.5f
+
+                    // 1) Horizontal drag at base scale: pass-through to HorizontalPager (no consume, no state change)
+                    if (scale == 1f && zoom == 1f && centroidMovedHorizontally) return@detectTransformGestures
+
+                    // 2) Pinch: update scale immediately
                     val newScale = (scale * zoom).coerceIn(1f, 3f)
                     scale = newScale
 
+                    // 3) Pan only when zoomed; at scale==1f keep offset at zero
                     offset =
-                        if (newScale == 1f) {
+                        if (newScale <= 1f) {
                             Offset.Zero
                         } else {
                             clampPanOffset(offset + pan, newScale, containerSize)

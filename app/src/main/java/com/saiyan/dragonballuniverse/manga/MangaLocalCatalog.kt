@@ -15,6 +15,11 @@ object MangaLocalCatalog {
         val chapterNumber: Int,
         val title: String,
         val releaseYear: String? = null,
+        /**
+         * If > 0, repository will skip network probing and generate page URLs deterministically:
+         * 001.webp .. totalPages.webp
+         */
+        val totalPages: Int = 0,
     )
 
     /**
@@ -36,7 +41,12 @@ object MangaLocalCatalog {
 
             MangaArc.SUPER ->
                 listOf(
-                    ChapterMeta(chapterNumber = 1, title = "Chapter 001", releaseYear = null),
+                    ChapterMeta(
+                        chapterNumber = 1,
+                        title = "Chapter 001",
+                        releaseYear = null,
+                        totalPages = 21,
+                    ),
                 )
         }
 }

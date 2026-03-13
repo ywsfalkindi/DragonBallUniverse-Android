@@ -76,21 +76,44 @@ class MangaRepositoryImpl(
 
         val baseUrl = MangaRetrofitClient.baseUrl().trimEnd('/')
 
-        // Probe sequential pages (001.webp, 002.webp...) until first 404.
-        // This allows “images-only” R2 hosting.
-        val pageUrls = mutableListOf<String>()
-        val maxPagesToProbe = 500 // safety cap; adjust if needed
+        val metaTotalPages =
+            MangaLocalCatalog
+                .chaptersForArc(arc)
+                .firstOrNull { it.chapterNumber == chapterNumber }
+                ?.totalPages
+                ?: 0
 
-        for (pageNumber in 1..maxPagesToProbe) {
-            val fileName = "${pageNumber.toString().padStart(3, '0')}.webp"
-            val url = "$baseUrl/manga/${arc.toApiArc()}/$chapterFolder/$fileName"
-
-            if (remoteFileExists(url)) {
-                pageUrls.add(url)
+        val pageUrls =
+            if (metaTotalPages > 0) {
+                // Guaranteed path: build deterministically from local catalog count.
+                (1..metaTotalPages).map { pageNumber ->
+                    val fileName = "${pageNumber.toString().padStart(3, '0')}.webp"
+                    "$baseUrl/manga/${arc.toApiArc()}/$chapterFolder/$fileName"
+                }
             } else {
-                break
+                // Fallback: probe sequential pages (001.webp, 002.webp...) until 3 misses in a row.
+                val urls = mutableListOf<String>()
+                val maxPagesToProbe = 500 // safety cap; adjust if needed
+                val maxConsecutiveMisses = 3
+
+                var consecutiveMisses = 0
+
+                for (pageNumber in 1..maxPagesToProbe) {
+                    val fileName = "${pageNumber.toString().padStart(3, '0')}.webp"
+                    val url = "$baseUrl/manga/${arc.toApiArc()}/$chapterFolder/$fileName"
+
+                    if (remoteFileExists(url)) {
+                        urls.add(url)
+                        consecutiveMisses = 0
+                    } else {
+                        consecutiveMisses += 1
+                        if (consecutiveMisses >= maxConsecutiveMisses) {
+                            break
+                        }
+                    }
+                }
+                urls
             }
-        }
 
         require(pageUrls.isNotEmpty()) { "Chapter pages are empty (no images found on R2)" }
 
