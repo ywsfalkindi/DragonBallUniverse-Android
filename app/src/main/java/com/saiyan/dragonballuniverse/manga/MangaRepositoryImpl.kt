@@ -1,5 +1,6 @@
 package com.saiyan.dragonballuniverse.manga
 
+import android.util.Log
 import com.saiyan.dragonballuniverse.db.MangaDownloadDao
 import com.saiyan.dragonballuniverse.db.MangaProgressDao
 import com.saiyan.dragonballuniverse.db.UserMangaProgressEntity
@@ -25,10 +26,13 @@ class MangaRepositoryImpl(
     private val chaptersCacheByArc: MutableMap<MangaArc, List<PocketBaseMangaChapterRecord>> = mutableMapOf()
 
     private suspend fun fetchChapterMetasFromPocketBase(arc: MangaArc): List<PocketBaseMangaChapterRecord> {
+        // Trust server-side filtering (do NOT re-filter client-side):
+        // - arc is stored in PB as lowercase string (classic/z/super)
+        // - is_published must be true
+        //
         // PocketBase filter syntax:
         // https://pocketbase.io/docs/api-records/#listrecords
-        // Strings must be double-quoted.
-        val filter = """is_published=true && arc="${arc.toApiArc()}""""
+        val filter = """is_published=true && arc="${arc.name.lowercase()}""""
 
         val resp =
             PocketBaseClient.apiService.listMangaChapters(
@@ -38,22 +42,31 @@ class MangaRepositoryImpl(
                 perPage = 200,
             )
 
-        // Extra safety: server-side filter should already handle is_published.
         return resp.items
-            .filter { it.isPublished }
-            .filter { it.arc.equals(arc.name.lowercase(), ignoreCase = true) }
-            .filter { it.chapterNumber > 0 }
     }
 
-    private suspend fun getCachedOrFetchChapterMetas(arc: MangaArc): List<PocketBaseMangaChapterRecord> =
-        try {
+    private suspend fun getCachedOrFetchChapterMetas(arc: MangaArc): List<PocketBaseMangaChapterRecord> {
+        // Cache rules:
+        // - If network succeeds and returns non-empty -> update cache and return it
+        // - If network succeeds but returns empty -> DO NOT overwrite cache; return cache (if any)
+        // - If network fails -> return cache (if any)
+        return try {
             val items = fetchChapterMetasFromPocketBase(arc)
-            chaptersCacheByArc[arc] = items
-            items
-        } catch (_: Exception) {
-            // Fallback to cache if available
+            println("PB_DEBUG: Fetched ${items.size} chapters for arc ${arc.name}")
+
+            if (items.isNotEmpty()) {
+                chaptersCacheByArc[arc] = items
+                items
+            } else {
+                // Avoid "locking" empty results forever.
+                chaptersCacheByArc[arc].orEmpty()
+            }
+        } catch (e: Exception) {
+            Log.e("PB_ERROR", "Failed to fetch chapters for arc ${arc.name}", e)
+            println("PB_DEBUG: Fetch failed for arc ${arc.name}: ${e::class.java.simpleName}: ${e.message}")
             chaptersCacheByArc[arc].orEmpty()
         }
+    }
 
     private val probeClient: OkHttpClient =
         OkHttpClient.Builder()

@@ -1,11 +1,16 @@
 package com.saiyan.dragonballuniverse.quiz
 
 import android.app.Application
+import android.provider.Settings
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.saiyan.dragonballuniverse.db.UserDatabase
 import com.saiyan.dragonballuniverse.db.UserStatsDao
 import com.saiyan.dragonballuniverse.db.UserStatsEntity
+import com.saiyan.dragonballuniverse.network.PocketBaseClient
+import com.saiyan.dragonballuniverse.network.PocketBaseUpsertUserStatsBody
+import com.saiyan.dragonballuniverse.network.PocketBaseUserStatsRecord
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -18,9 +23,11 @@ import kotlinx.coroutines.withContext
 
 sealed interface QuizUiState {
     data object Home : QuizUiState
+    data object Loading : QuizUiState
     data object Playing : QuizUiState
     data class GameOver(val earnedPower: Long) : QuizUiState
     data class Victory(val earnedPower: Long) : QuizUiState
+    data class Error(val message: String, val details: String) : QuizUiState
 }
 
 data class QuizSessionState(
@@ -54,12 +61,83 @@ class QuizViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun deviceId(): String =
+        Settings.Secure.getString(getApplication<Application>().contentResolver, Settings.Secure.ANDROID_ID)
+            ?: "unknown_device"
+
     private suspend fun loadOrCreateStats() {
         val loaded =
             withContext(Dispatchers.IO) {
                 dao.getStats() ?: UserStatsEntity().also { dao.upsert(it) }
             }
         _stats.value = loaded
+    }
+
+    /**
+     * Sync stats from PocketBase (public user_stats collection).
+     * If record doesn't exist yet, we keep local defaults and will create it on first update.
+     */
+    private suspend fun syncStatsFromPocketBase() {
+        val did = deviceId()
+        val filter = """device_id="${did}""""
+
+        val resp =
+            PocketBaseClient.apiService.listUserStats(
+                filter = filter,
+                page = 1,
+                perPage = 1,
+            )
+
+        val record: PocketBaseUserStatsRecord? = resp.items.firstOrNull()
+        if (record != null) {
+            val merged =
+                _stats.value.copy(
+                    powerLevel = record.powerLevel,
+                    senzuBeans = record.senzuBeans,
+                    highestStreak = record.highestStreak,
+                    lastPlayedTimestamp = record.lastPlayedTimestamp,
+                )
+
+            withContext(Dispatchers.IO) { dao.upsert(merged) }
+            _stats.value = merged
+        }
+    }
+
+    /**
+     * Push current local stats to PocketBase (create if missing, otherwise patch).
+     *
+     * Collection is public (no auth) and keyed by device_id.
+     */
+    private suspend fun pushStatsToPocketBase() {
+        val did = deviceId()
+        val filter = """device_id="${did}""""
+
+        val existing =
+            PocketBaseClient.apiService
+                .listUserStats(
+                    filter = filter,
+                    page = 1,
+                    perPage = 1,
+                )
+                .items
+                .firstOrNull()
+
+        val body =
+            PocketBaseUpsertUserStatsBody(
+                deviceId = did,
+                powerLevel = _stats.value.powerLevel,
+                senzuBeans = _stats.value.senzuBeans,
+                highestStreak = _stats.value.highestStreak,
+                lastPlayedTimestamp = _stats.value.lastPlayedTimestamp,
+            )
+
+        if (existing == null) {
+            PocketBaseClient.apiService.createUserStats(body)
+            Log.d("PB_DEBUG", "Quiz: created user_stats for device_id=$did")
+        } else {
+            PocketBaseClient.apiService.updateUserStats(existing.id, body)
+            Log.d("PB_DEBUG", "Quiz: updated user_stats id=${existing.id} for device_id=$did")
+        }
     }
 
     fun backToHome() {
@@ -102,27 +180,83 @@ class QuizViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startGame() {
         viewModelScope.launch {
-            loadOrCreateStats()
-            maybeRefillDailySenzuInternal()
+            _uiState.value = QuizUiState.Loading
+            try {
+                loadOrCreateStats()
+                // Pull latest stats from PB (if exists)
+                syncStatsFromPocketBase()
 
-            val currentStats = _stats.value
-            // 0 Senzu: Disable button (UI should handle); double-safety here:
-            if (currentStats.senzuBeans <= 0) {
-                _uiState.value = QuizUiState.Home
-                return@launch
+                maybeRefillDailySenzuInternal()
+
+                val currentStats = _stats.value
+                // 0 Senzu: Disable button (UI should handle); double-safety here:
+                if (currentStats.senzuBeans <= 0) {
+                    _uiState.value = QuizUiState.Home
+                    return@launch
+                }
+
+                val pbQuestions =
+                    PocketBaseClient.apiService
+                        .listQuizQuestions(
+                            page = 1,
+                            perPage = 200,
+                        )
+                        .items
+
+                val mapped =
+                    pbQuestions.mapIndexedNotNull { idx, r ->
+                        // Treat missing is_published as published=true by default.
+                        val published = r.isPublished ?: true
+                        if (!published) return@mapIndexedNotNull null
+
+                        val questionText = r.question?.trim().orEmpty()
+                        val options =
+                            r.answers
+                                ?.filterNotNull()
+                                ?.map { it.trim() }
+                                ?.filter { it.isNotBlank() }
+                                .orEmpty()
+
+                        // Skip records that are too broken to be playable.
+                        // Must have question + at least 2 options.
+                        if (questionText.isBlank() || options.size < 2) return@mapIndexedNotNull null
+
+                        val safeDifficulty = r.difficulty?.takeIf { it.isNotBlank() } ?: DIFF_EASY
+                        val safeIndex = (r.correctAnswerIndex ?: 0).coerceIn(0, options.lastIndex)
+
+                        QuizQuestion(
+                            id = idx + 1, // local int id required by current UI
+                            text = questionText,
+                            options = options,
+                            correctAnswerIndex = safeIndex,
+                            difficulty = safeDifficulty,
+                        )
+                    }
+
+                if (mapped.isEmpty()) {
+                    throw IllegalStateException(
+                        "PocketBase returned 0 valid quiz questions. Ensure at least one record has question+answers and is_published!=false.",
+                    )
+                }
+
+                // Allow running with <10 questions; buildSessionQuestions already returns all if <= count.
+                val questions = buildSessionQuestions(mapped, count = 10)
+
+                _session.value =
+                    QuizSessionState(
+                        questions = questions,
+                        currentIndex = 0,
+                        currentStreak = 0,
+                        earnedPower = 0L,
+                        isAnswered = false,
+                    )
+                _uiState.value = QuizUiState.Playing
+                Log.d("PB_DEBUG", "Quiz: fetched ${pbQuestions.size} questions from PocketBase")
+            } catch (e: Exception) {
+                Log.e("PB_ERROR", "Quiz: failed to start game", e)
+                val details = "${e::class.java.simpleName}: ${e.message}"
+                _uiState.value = QuizUiState.Error(message = "Failed to load quiz", details = details)
             }
-
-            val questions = buildSessionQuestions(dummyQuestions, count = 10)
-
-            _session.value =
-                QuizSessionState(
-                    questions = questions,
-                    currentIndex = 0,
-                    currentStreak = 0,
-                    earnedPower = 0L,
-                    isAnswered = false
-                )
-            _uiState.value = QuizUiState.Playing
         }
     }
 
@@ -173,6 +307,12 @@ class QuizViewModel(application: Application) : AndroidViewModel(application) {
             }
             _stats.value = updatedStats
 
+            try {
+                pushStatsToPocketBase()
+            } catch (e: Exception) {
+                Log.e("PB_ERROR", "Quiz: failed to persist stats (correct answer)", e)
+            }
+
             goNextOrFinish(
                 session = session.copy(
                     currentStreak = newStreak,
@@ -204,6 +344,12 @@ class QuizViewModel(application: Application) : AndroidViewModel(application) {
                 dao.upsert(updatedStats)
             }
             _stats.value = updatedStats
+
+            try {
+                pushStatsToPocketBase()
+            } catch (e: Exception) {
+                Log.e("PB_ERROR", "Quiz: failed to persist stats (wrong/expired)", e)
+            }
 
             val newSession =
                 session.copy(

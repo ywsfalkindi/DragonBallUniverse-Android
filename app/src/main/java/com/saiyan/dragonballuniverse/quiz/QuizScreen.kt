@@ -45,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -73,6 +74,17 @@ fun QuizMainScreen(
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val session by viewModel.session.collectAsStateWithLifecycle()
 
+    val context = LocalContext.current
+
+    LaunchedEffect(uiState) {
+        val s = uiState
+        if (s is QuizUiState.Error) {
+            Toast
+                .makeText(context, "Quiz error: ${s.details}", Toast.LENGTH_LONG)
+                .show()
+        }
+    }
+
     when (val state = uiState) {
         QuizUiState.Home -> {
             Box(
@@ -88,6 +100,19 @@ fun QuizMainScreen(
                     onStart = { viewModel.startGame() },
                     bounceClick = bounceClick
                 )
+            }
+        }
+
+        QuizUiState.Loading -> {
+            Box(
+                modifier =
+                    modifier
+                        .fillMaxSize()
+                        .background(DarkBackground)
+                        .padding(16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(text = "جاري تحميل الأسئلة...", color = Color.White)
             }
         }
 
@@ -129,10 +154,11 @@ fun QuizMainScreen(
 
         is QuizUiState.Victory -> {
             Box(
-                modifier = modifier
-                    .fillMaxSize()
-                    .background(DarkBackground)
-                    .padding(16.dp)
+                modifier =
+                    modifier
+                        .fillMaxSize()
+                        .background(DarkBackground)
+                        .padding(16.dp),
             ) {
                 QuizResultContent(
                     title = "أحسنت! أنهيت التحدي",
@@ -140,7 +166,25 @@ fun QuizMainScreen(
                     earnedPower = state.earnedPower,
                     powerLevel = stats.powerLevel,
                     onBack = { viewModel.backToHome() },
-                    bounceClick = bounceClick
+                    bounceClick = bounceClick,
+                )
+            }
+        }
+
+        is QuizUiState.Error -> {
+            Box(
+                modifier =
+                    modifier
+                        .fillMaxSize()
+                        .background(DarkBackground)
+                        .padding(16.dp),
+            ) {
+                QuizHomeContent(
+                    powerLevel = stats.powerLevel,
+                    senzuBeans = stats.senzuBeans,
+                    highestStreak = stats.highestStreak,
+                    onStart = { viewModel.startGame() },
+                    bounceClick = bounceClick,
                 )
             }
         }

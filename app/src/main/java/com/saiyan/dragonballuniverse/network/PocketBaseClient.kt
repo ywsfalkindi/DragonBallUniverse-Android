@@ -1,5 +1,6 @@
 package com.saiyan.dragonballuniverse.network
 
+import android.util.Log
 import com.saiyan.dragonballuniverse.BuildConfig
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
@@ -46,6 +47,10 @@ object PocketBaseClient {
             .client(okHttp)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
+
+    init {
+        Log.d("PB_DEBUG", "PocketBase BASE_URL=$BASE_URL (DEBUG=${BuildConfig.DEBUG})")
+    }
 
     val apiService: PocketBaseService = retrofit.create(PocketBaseService::class.java)
 }
